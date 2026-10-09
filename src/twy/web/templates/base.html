@@ -1,0 +1,54 @@
+{%- macro icon(name) -%}
+<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+  {%- if name == "home" %}<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>
+  {%- elif name == "plan" %}<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>
+  {%- elif name == "review" %}<path d="m8.5 11.5 3 3 8-8"/><path d="M20 12.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10"/>
+  {%- elif name == "trend" %}<path d="M3 21h18M6 17v-5M11 17V7M16 17v-8M21 17V4"/>
+  {%- elif name == "more" %}<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+  {%- endif %}
+</svg>
+{%- endmacro -%}
+{%- macro cycle_link(endpoint) -%}
+{{ url_for(endpoint, cycle_id=nav_cycle_id) if nav_cycle_id else url_for('web.index') }}
+{%- endmacro -%}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101317" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="12 Week Year">
+  <title>{% block title %}12 Week Year{% endblock %} · twy</title>
+  <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-180.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% block chrome %}
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('web.index') }}"><img src="{{ url_for('static', filename='icon.svg') }}" alt=""> 12 Week Year</a>
+  </header>
+  <nav class="tabbar" aria-label="Main">
+    <a href="{{ cycle_link('web.dashboard') }}" class="{{ 'on' if tab == 'home' }}">{{ icon("home") }}<span>Home</span></a>
+    <a href="{{ cycle_link('web.plan') }}" class="{{ 'on' if tab == 'plan' }}">{{ icon("plan") }}<span>Plan</span></a>
+    <a href="{{ cycle_link('web.review_default') }}" class="{{ 'on' if tab == 'review' }}">{{ icon("review") }}<span>Review</span></a>
+    <a href="{{ cycle_link('web.trend') }}" class="{{ 'on' if tab == 'trend' }}">{{ icon("trend") }}<span>Trend</span></a>
+    <a href="{{ url_for('web.more') }}" class="mobile-only {{ 'on' if tab == 'more' }}">{{ icon("more") }}<span>More</span></a>
+    <a href="{{ cycle_link('web.week13') }}" class="desktop-only">Week 13</a>
+    <a href="{{ url_for('web.cycles') }}" class="desktop-only">Cycles</a>
+    <a href="{{ url_for('web.vision') }}" class="desktop-only">Vision</a>
+    <a href="{{ url_for('web.settings') }}" class="desktop-only">Settings</a>
+  </nav>
+  {% endblock %}
+  <main class="page">
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

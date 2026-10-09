@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}New cycle{% endblock %}
+{% block content %}
+<h1>New 12-week cycle</h1>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  {% if copy_from %}<input type="hidden" name="copy_from" value="{{ copy_from }}">{% endif %}
+  <label for="name">Name</label>
+  <input id="name" name="name" value="{{ form.name }}" required>
+  <label for="start">Start date <span class="muted">(moves to the next {{ week_start_name }})</span></label>
+  <input id="start" name="start" type="date" value="{{ form.start }}" required data-snap data-week-start="{{ week_start }}">
+  <p class="muted small" data-snap-preview></p>
+  {% if copy_from %}
+  <label class="check"><input type="checkbox" name="copy" {{ 'checked' if form.copy }}> Copy goals and tactics from “{{ copy_name }}”</label>
+  {% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn primary block">Create cycle</button>
+</form>
+{% endblock %}

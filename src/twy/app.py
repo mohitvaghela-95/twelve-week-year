@@ -20,6 +20,7 @@ from twy.screens.settings import SettingsScreen
 from twy.screens.trend import TrendScreen
 from twy.screens.vision import VisionScreen
 from twy.screens.week13 import Week13Screen
+from twy.services import create_cycle, previous_cycle_id
 
 SCREENS = {
     "dashboard": DashboardScreen,
@@ -86,18 +87,13 @@ class TwyApp(App):
 
     def new_cycle(self, copy_from: int | None = None) -> None:
         """Ask for name/start date, create the cycle and open the plan."""
-        previous = copy_from
-        if previous is None:
-            cycles = self.repo.list_cycles()
-            previous = cycles[0].id if cycles else None
+        previous = copy_from if copy_from is not None else previous_cycle_id(self.repo)
 
         def created(result: tuple[str, date, bool] | None) -> None:
             if result is None:
                 return
             name, start, copy = result
-            cycle = self.repo.create_cycle(name, start, self.repo.week_start)
-            if copy and previous is not None:
-                self.repo.copy_plan(previous, cycle.id)
+            create_cycle(self.repo, name, start, previous if copy else None)
             self.viewing_cycle_id = None
             self.notify(f"Created “{name}”. Add goals and tactics, then press Start cycle.")
             self.call_after_refresh(self.action_goto, "plan")

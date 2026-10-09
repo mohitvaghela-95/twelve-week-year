@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Trend · {{ cycle.name }}{% endblock %}
+{% block content %}
+<h1>Trend</h1>
+<p class="muted">{{ cycle.name }} · average <strong>{{ average|score }}</strong> over {{ reviewed_count }} reviewed week{{ "" if reviewed_count == 1 else "s" }}</p>
+<section class="card">{{ chart }}<p class="muted small">Dashed line: the 85% target.</p></section>
+<section class="weeks">
+  {% for w in weeks %}
+  <article class="card week {{ 'unreviewed' if not w.review }}">
+    <div class="card-head">
+      <h3>Week {{ w.no }} <span class="muted small">{{ w.first.strftime("%d %b") }} – {{ w.last.strftime("%d %b") }}</span></h3>
+      {% if w.review %}<span class="tag band-{{ w.score|band }}">{{ w.score|score }}</span>{% else %}<span class="muted small">not reviewed</span>{% endif %}
+    </div>
+    {% if w.review and (w.review.obstacles or w.review.fix) %}
+    <dl>
+      {% if w.review.obstacles %}<dt>What got in the way</dt><dd>{{ w.review.obstacles }}</dd>{% endif %}
+      {% if w.review.fix %}<dt>Fix</dt><dd>{{ w.review.fix }}</dd>{% endif %}
+    </dl>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

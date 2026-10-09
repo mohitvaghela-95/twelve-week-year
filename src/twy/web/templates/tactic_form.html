@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit tactic" if tactic.id else "New tactic" }}{% endblock %}
+{% block content %}
+<h1>{{ "Edit tactic" if tactic.id else "New tactic" }}</h1>
+<p class="muted">For “{{ goal.title }}”</p>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="title">Action you control <span class="muted">(done or not, each time)</span></label>
+  <input id="title" name="title" value="{{ fields.title }}" placeholder="e.g. Run 30 min" required autofocus>
+  <div class="grid3">
+    <div><label for="times">Times / week</label><input id="times" name="times" value="{{ fields.times }}" type="number" min="1" inputmode="numeric"></div>
+    <div><label for="start">From week</label><input id="start" name="start" value="{{ fields.start }}" type="number" min="1" max="{{ EXECUTION_WEEKS }}" inputmode="numeric"></div>
+    <div><label for="end">To week</label><input id="end" name="end" value="{{ fields.end }}" type="number" min="1" max="{{ EXECUTION_WEEKS }}" inputmode="numeric"></div>
+  </div>
+  <p class="muted small">“Run 3×/week” adds 3 items to each week in its range.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <div class="row-buttons">
+    <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Cancel</a>
+    <button class="btn primary">Save tactic</button>
+  </div>
+</form>
+{% endblock %}

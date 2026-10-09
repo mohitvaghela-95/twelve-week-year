@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<section class="card empty">
+  <h1>No active cycle</h1>
+  <p>Start a new 12-week cycle: set 1–3 goals, the weekly tactics that get you there, then score each week.</p>
+  <a class="btn primary block" href="{{ url_for('web.new_cycle') }}">Start a new cycle</a>
+  {% if has_cycles %}<a class="btn block" href="{{ url_for('web.cycles') }}">Browse past cycles</a>{% endif %}
+</section>
+{% endblock %}

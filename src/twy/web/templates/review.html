@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Review · {{ cycle.name }}{% endblock %}
+{% block content %}
+{% if week_no is none %}
+<h1>Weekly review</h1>
+<section class="card empty"><p>“{{ cycle.name }}” starts on {{ cycle.start_date.strftime("%a %d %b") }}. Nothing to review yet.</p></section>
+{% else %}
+<nav class="weekpicker" aria-label="Week">
+  {% for w in weeks %}
+  <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=w) }}" class="chip{{ ' on' if w == week_no }}{{ ' done' if w in reviewed }}"
+     {% if w == week_no %}aria-current="page"{% endif %}>{{ w }}{% if w in reviewed %}<span aria-label="reviewed">✓</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+<div class="page-head">
+  <h1>Week {{ week_no }}</h1>
+  <span class="muted">{{ first.strftime("%a %d %b") }} – {{ last.strftime("%a %d %b") }}</span>
+</div>
+{% if existing %}<p class="muted small">Reviewed {{ existing.reviewed_at.strftime("%d %b %H:%M") }} UTC. Saving again updates it.</p>{% endif %}
+{% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
+
+<form method="post" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <fieldset class="plain" {{ 'disabled' if read_only }}>
+  <div class="scorepill band-{{ score|band }}" data-live-score>
+    <span>Score <strong data-value>{{ score|score }}</strong></span><span class="muted small">target 85%</span>
+  </div>
+
+  <section class="card">
+    <h2>Scorecard</h2>
+    <p class="muted small">How many times did you do each tactic?</p>
+    {% for r in rows %}
+    <div class="score-row" data-planned="{{ r.planned }}">
+      <label class="tactic" for="done-{{ r.tactic_id }}"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}</label>
+      <div class="stepper">
+        <button type="button" data-step="-1" aria-label="One less">−</button>
+        <input id="done-{{ r.tactic_id }}" name="done-{{ r.tactic_id }}" type="number" value="{{ r.done }}" min="0" max="{{ r.planned }}" inputmode="numeric">
+        <span class="of">/ {{ r.planned }}</span>
+        <button type="button" data-step="1" aria-label="One more">+</button>
+      </div>
+    </div>
+    {% else %}
+    <p class="muted">No tactics planned for this week.</p>
+    {% endfor %}
+  </section>
+
+  {% if lag_goals %}
+  <section class="card">
+    <h2>Lag measures</h2>
+    <p class="muted small">Optional: where each goal stands now.</p>
+    {% for g in lag_goals %}
+    <div class="lag-row">
+      <label for="lag-{{ g.id }}">{{ g.title }} <span class="muted small">target {{ g.target|num }}{{ " " ~ g.unit if g.unit }}</span></label>
+      <div class="with-unit">
+        <input id="lag-{{ g.id }}" name="lag-{{ g.id }}" value="{{ values['lag-%d' % g.id] }}" inputmode="decimal">
+        {% if g.unit %}<span class="muted">{{ g.unit }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <label for="obstacles">What got in the way?</label>
+    <textarea id="obstacles" name="obstacles" rows="3">{{ values.obstacles }}</textarea>
+    <label for="fix">One fix for next week</label>
+    <textarea id="fix" name="fix" rows="2">{{ values.fix }}</textarea>
+  </section>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if not read_only %}<button class="btn primary block">Save review</button>{% endif %}
+  </fieldset>
+</form>
+{% endif %}
+{% endblock %}

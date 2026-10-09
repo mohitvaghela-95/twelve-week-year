@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="week_start">Week starts on</label>
+  <select id="week_start" name="week_start">
+    {% for name in weekdays %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == week_start }}>{{ name }}</option>{% endfor %}
+  </select>
+  <p class="muted small">Applies to new cycles. Existing cycles keep their dates.</p>
+  <button class="btn primary block">Save</button>
+</form>
+<section class="card stack">
+  <h2>Backup</h2>
+  <p class="muted small">Everything lives in one SQLite file on the server:<br><code>{{ db_path }}</code></p>
+  <a class="btn block" href="{{ url_for('web.backup') }}" download>Download backup</a>
+</section>
+<form method="post" action="{{ url_for('auth.logout') }}" class="desktop-only">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <button class="btn">Log out</button>
+</form>
+{% endblock %}

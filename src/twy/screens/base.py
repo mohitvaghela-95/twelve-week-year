@@ -1,10 +1,12 @@
-"""Shared screen base and small parsing helpers."""
+"""Shared screen base; parsing helpers are re-exported from twy.services."""
 
 from typing import TYPE_CHECKING
 
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Footer, Header
+
+from twy.services import fmt_num, parse_float, parse_int  # noqa: F401 (re-exported for screens)
 
 if TYPE_CHECKING:
     from twy.app import TwyApp
@@ -29,19 +31,3 @@ class TwyScreen(Screen):
             self.notify("This cycle is closed and read-only.", severity="warning")
             return True
         return False
-
-
-def parse_float(text: str) -> float | None:
-    text = text.strip()
-    return float(text) if text else None
-
-
-def parse_int(text: str, default: int = 0) -> int:
-    text = text.strip()
-    return int(text) if text else default
-
-
-def fmt_num(value: float | None) -> str:
-    if value is None:
-        return ""
-    return f"{value:g}"

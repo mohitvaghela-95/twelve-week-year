@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Week 13 · {{ cycle.name }}{% endblock %}
+{% block content %}
+<h1>Week 13 review</h1>
+<section class="card hero">
+  <p class="eyebrow">{{ cycle.name }}</p>
+  <div class="stats">
+    <div class="stat band-{{ average|band }}"><span class="label">Average execution</span><span class="value">{{ average|score }}</span><span class="muted small">{{ reviewed_count }}/12 weeks reviewed</span></div>
+    <div class="stat"><span class="label">Weeks ≥ 85%</span><span class="value">{{ good_weeks }}</span></div>
+  </div>
+  {% if early and not read_only %}<p class="warn-line">⚠ The cycle is still running (week {{ current_week }}). You can review early, but results may change.</p>{% endif %}
+</section>
+{% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
+
+<form method="post" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <fieldset class="plain" {{ 'disabled' if read_only }}>
+  <section class="card">
+    <h2>Goals</h2>
+    {% for row in goal_rows %}
+    {% set g = row.goal %}
+    <div class="w13-goal" {% if g.measurable %}data-target="{{ g.target }}" data-baseline="{{ g.baseline if g.baseline is not none else '' }}"{% endif %}>
+      <div><strong>{{ g.title }}</strong>{% if g.measurable %}<div class="muted small">{{ g.baseline|num or "?" }} → {{ g.target|num }}{{ " " ~ g.unit if g.unit }}</div>{% endif %}</div>
+      {% if g.measurable %}
+      <div class="w13-input">
+        <label class="sr-only" for="final-{{ g.id }}">Final value</label>
+        <input id="final-{{ g.id }}" name="final-{{ g.id }}" value="{{ values['final-%d' % g.id] }}" placeholder="final" inputmode="decimal" data-final>
+        <span class="tag {{ 'good' if row.outcome == 'hit' else 'bad' if row.outcome == 'missed' }}" data-outcome>{{ {"hit": "✓ hit", "missed": "✗ missed"}.get(row.outcome, "—") }}</span>
+      </div>
+      {% else %}
+      {% set current = values['manual-%d' % g.id] %}
+      <select name="manual-{{ g.id }}" aria-label="Outcome for {{ g.title }}">
+        <option value="" {{ 'selected' if not current }}>Hit or missed?</option>
+        <option value="hit" {{ 'selected' if current == 'hit' }}>✓ Hit</option>
+        <option value="missed" {{ 'selected' if current == 'missed' }}>✗ Missed</option>
+      </select>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">This cycle has no goals.</p>
+    {% endfor %}
+  </section>
+  <section class="card">
+    <label for="lessons">Lessons: what worked, what didn't, what will you change?</label>
+    <textarea id="lessons" name="lessons" rows="4">{{ values.lessons }}</textarea>
+    <label for="celebration">How will you celebrate?</label>
+    <textarea id="celebration" name="celebration" rows="2">{{ values.celebration }}</textarea>
+  </section>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if not read_only %}
+  <div class="row-buttons">
+    <button class="btn primary" name="action" value="save">Save review</button>
+    <button class="btn warn" name="action" value="close" data-confirm="Close “{{ cycle.name }}”? It becomes read-only and you can start the next cycle.">Close cycle &amp; start next</button>
+  </div>
+  {% endif %}
+  </fieldset>
+</form>
+{% endblock %}

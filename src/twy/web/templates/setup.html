@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Welcome{% endblock %}
+{% block content %}
+<h1>Welcome</h1>
+<p class="lead">The 12 Week Year treats 12 weeks as your whole year. Pick the day your weeks start, write your vision, then plan your first cycle.</p>
+<form method="post" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <section class="card">
+    <label for="week_start">Week starts on</label>
+    <select id="week_start" name="week_start">
+      {% for name in weekdays %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.first }}>{{ name }}</option>{% endfor %}
+    </select>
+  </section>
+  <section class="card">
+    <p class="muted">Your vision is the reason to do the hard tactics. Cover health, work, money, relationships and growth. A few honest paragraphs is enough.</p>
+    <label for="long_term">Long-term vision (10+ years)</label>
+    <textarea id="long_term" name="long_term" rows="5"></textarea>
+    <label for="three_year">3-year vision</label>
+    <textarea id="three_year" name="three_year" rows="5"></textarea>
+  </section>
+  <button class="btn primary block">Next: create your first cycle</button>
+</form>
+{% endblock %}

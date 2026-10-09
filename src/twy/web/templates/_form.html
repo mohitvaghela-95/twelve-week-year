@@ -1,0 +1,8 @@
+{#- Small POST buttons used on the plan page. -#}
+{% macro post_button(action, label, title, confirm=None, delta=None, cls="icon-btn") -%}
+<form method="post" action="{{ action }}" class="inline"{% if confirm %} data-confirm="{{ confirm }}"{% endif %}>
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  {% if delta is not none %}<input type="hidden" name="delta" value="{{ delta }}">{% endif %}
+  <button class="{{ cls }}" title="{{ title }}" aria-label="{{ title }}">{{ label }}</button>
+</form>
+{%- endmacro %}

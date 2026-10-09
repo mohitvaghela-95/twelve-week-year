@@ -2,9 +2,10 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Static
 
-from twy.domain.dates import EXECUTION_WEEKS, current_week, cycle_end, last_finished_week, week_range
+from twy.domain.dates import cycle_end
 from twy.domain.scoring import cycle_average, format_score, goal_outcome, score_band
 from twy.screens.base import TwyScreen, fmt_num
+from twy.services import cycle_status, show_goal_outcomes
 from twy.widgets.score_chart import ScoreChart
 
 
@@ -53,39 +54,20 @@ class DashboardScreen(TwyScreen):
             self.query_one(ScoreChart).set_scores({})
             return
 
-        today = app.today
-        pos = current_week(cycle.start_date, today)
+        status = cycle_status(repo, cycle, app.today)
         scores = repo.weekly_scores(cycle.id)
-        reviewed = repo.reviewed_weeks(cycle.id)
-        pending = [w for w in range(1, last_finished_week(cycle.start_date, today) + 1) if w not in reviewed]
+        banners = {
+            "read_only": f"Viewing closed cycle “{cycle.name}” (read-only). Press [b]x[/b] to return to the current cycle.",
+            "planning": "Cycle is in planning. Press [b]p[/b] to add goals and tactics, then start the cycle.",
+            "pending": f"Weekly review pending for week {', '.join(str(w) for w in status.pending)}. Press [b]r[/b] to score it.",
+            "week13": "Week 12 is done. Press [b]w[/b] for your Week 13 review.",
+        }
+        banner.update(banners.get(status.banner, ""))
+        if status.banner:
+            banner.add_class("warn" if status.banner == "pending" else "info")
 
-        if app.read_only:
-            banner.update(f"Viewing closed cycle “{cycle.name}” (read-only). Press [b]x[/b] to return to the current cycle.")
-            banner.add_class("info")
-        elif cycle.status == "planning":
-            banner.update("Cycle is in planning. Press [b]p[/b] to add goals and tactics, then start the cycle.")
-            banner.add_class("info")
-        elif pending:
-            weeks = ", ".join(str(w) for w in pending)
-            banner.update(f"Weekly review pending for week {weeks}. Press [b]r[/b] to score it.")
-            banner.add_class("warn")
-        elif pos.in_review_week or pos.finished:
-            banner.update("Week 12 is done. Press [b]w[/b] for your Week 13 review.")
-            banner.add_class("info")
-        else:
-            banner.update("")
-
-        if pos.not_started:
-            where = f"Starts {cycle.start_date:%a %d %b}"
-        elif pos.finished:
-            where = "Finished"
-        elif pos.in_review_week:
-            where = "Week 13 · review"
-        else:
-            first, last = week_range(cycle.start_date, pos.week_no)
-            where = f"Week {pos.week_no} of {EXECUTION_WEEKS}  ({first:%d %b} – {last:%d %b})"
         self.query_one("#cycle-info", Static).update(
-            f"[b]{cycle.name}[/b]  ·  {cycle.status}\n{where}\n"
+            f"[b]{cycle.name}[/b]  ·  {cycle.status}\n{status.where}\n"
             f"[dim]{cycle.start_date:%d %b %Y} → {cycle_end(cycle.start_date):%d %b %Y}[/dim]"
         )
 
@@ -104,7 +86,7 @@ class DashboardScreen(TwyScreen):
                 now = fmt_num(goal.final_value if goal.final_value is not None else latest) or "—"
                 line += f"   [dim]{fmt_num(goal.baseline) or '?'} → {fmt_num(goal.target)}{unit}, now {now}[/dim]"
             outcome = goal_outcome(goal, latest)
-            if outcome and (pos.in_review_week or pos.finished or cycle.status in ("review", "closed")):
+            if outcome and show_goal_outcomes(cycle, status):
                 line += "  [green]✓ hit[/green]" if outcome == "hit" else "  [red]✗ missed[/red]"
             lines.append(line)
         if len(lines) == 1:

@@ -4,9 +4,9 @@ from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from twy.domain.dates import current_week
 from twy.domain.scoring import cycle_average, format_score, goal_outcome
-from twy.models import CycleReview
 from twy.screens.base import TwyScreen, fmt_num, parse_float
 from twy.screens.forms import ConfirmModal
+from twy.services import FormError, close_cycle, save_week13
 
 OUTCOMES = [("✓ Hit", "hit"), ("✗ Missed", "missed")]
 
@@ -113,27 +113,25 @@ class Week13Screen(TwyScreen):
 
     def save(self) -> bool:
         cycle, repo = self.app.cycle, self.app.repo
+        finals, manual = {}, {}
         for g in repo.list_goals(cycle.id):
             if g.measurable:
-                try:
-                    g.final_value = parse_float(self.query_one(f"#final-{g.id}", Input).value)
-                except ValueError:
-                    self.notify(f"Final value for “{g.title}” must be a number.", severity="error")
-                    return False
-                g.outcome = goal_outcome(g)
+                finals[g.id] = self.query_one(f"#final-{g.id}", Input).value
             else:
                 value = self.query_one(f"#manual-{g.id}", Select).value
-                g.outcome = value if isinstance(value, str) else None
-            repo.save_goal(g)
-        repo.save_cycle_review(
-            CycleReview(
-                cycle.id,
-                lessons=self.query_one("#lessons", TextArea).text.strip(),
-                celebration=self.query_one("#celebration", TextArea).text.strip(),
+                manual[g.id] = value if isinstance(value, str) else None
+        try:
+            save_week13(
+                repo,
+                cycle,
+                finals,
+                manual,
+                self.query_one("#lessons", TextArea).text,
+                self.query_one("#celebration", TextArea).text,
             )
-        )
-        if cycle.status != "closed":
-            repo.set_cycle_status(cycle.id, "review")
+        except FormError as e:
+            self.notify(str(e), severity="error")
+            return False
         return True
 
     def action_save(self) -> None:
@@ -150,7 +148,7 @@ class Week13Screen(TwyScreen):
         def confirmed(ok: bool | None) -> None:
             if not ok:
                 return
-            self.app.repo.set_cycle_status(cycle.id, "closed")
+            close_cycle(self.app.repo, cycle)
             self.notify(f"“{cycle.name}” closed. Well done.")
             from twy.screens.dashboard import DashboardScreen
 

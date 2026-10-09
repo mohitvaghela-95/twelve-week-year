@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}More{% endblock %}
+{% block content %}
+<h1>More</h1>
+<nav class="card menu">
+  <a href="{{ url_for('web.week13', cycle_id=nav_cycle_id) if nav_cycle_id else url_for('web.index') }}">Week 13 review<span>›</span></a>
+  <a href="{{ url_for('web.cycles') }}">Cycles<span>›</span></a>
+  <a href="{{ url_for('web.vision') }}">Vision<span>›</span></a>
+  <a href="{{ url_for('web.settings') }}">Settings &amp; backup<span>›</span></a>
+</nav>
+<form method="post" action="{{ url_for('auth.logout') }}">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <button class="btn block">Log out</button>
+</form>
+{% endblock %}

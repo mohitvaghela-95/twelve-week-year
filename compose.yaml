@@ -1,0 +1,13 @@
+services:
+  twy:
+    build: .
+    image: twy:latest
+    container_name: twy  # so `docker exec -it twy twy` opens the terminal app
+    restart: unless-stopped
+    env_file: .env
+    # Run as the server user that owns ./data (deploy.sh fills these in from `id -u` / `id -g`).
+    user: "${TWY_UID:-1000}:${TWY_GID:-1000}"
+    ports:
+      - "${TWY_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data

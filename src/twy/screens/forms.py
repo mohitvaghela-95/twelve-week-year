@@ -1,6 +1,5 @@
 """Modal dialogs: new cycle, goal and tactic editors, confirmation."""
 
-from dataclasses import replace
 from datetime import date
 
 from textual.app import ComposeResult
@@ -8,9 +7,9 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Static
 
-from twy.domain.dates import EXECUTION_WEEKS, WEEKDAY_NAMES, align_to_week_start, cycle_end
+from twy.domain.dates import WEEKDAY_NAMES, align_to_week_start, cycle_end
 from twy.models import Goal, Tactic
-from twy.screens.base import fmt_num, parse_float, parse_int
+from twy.services import FormError, fmt_num, parse_cycle_form, parse_goal_form, parse_tactic_form, snap_start
 
 
 class FormModal(ModalScreen):
@@ -100,10 +99,7 @@ class NewCycleModal(FormModal):
             self.update_snap()
 
     def snapped(self) -> date | None:
-        try:
-            return align_to_week_start(date.fromisoformat(self.value("start").strip()), self.week_start)
-        except ValueError:
-            return None
+        return snap_start(self.value("start"), self.week_start)
 
     def update_snap(self) -> None:
         start = self.snapped()
@@ -115,18 +111,17 @@ class NewCycleModal(FormModal):
         self.query_one("#snap", Static).update(text)
 
     def submit(self) -> None:
-        name = self.value("name").strip()
-        start = self.snapped()
-        if not name:
-            return self.error("Name is required.")
-        if start is None:
-            return self.error("Start date must be YYYY-MM-DD.")
+        try:
+            name, start = parse_cycle_form(self.value("name"), self.value("start"), self.week_start)
+        except FormError as e:
+            return self.error(str(e))
         copy = self.can_copy and self.query_one("#copy", Checkbox).value
         self.dismiss((name, start, copy))
 
 
 class GoalForm(FormModal):
     TITLE_TEXT = "Goal"
+    FIELDS = ("title", "why", "unit", "baseline", "target")
 
     def __init__(self, goal: Goal):
         super().__init__()
@@ -145,29 +140,15 @@ class GoalForm(FormModal):
             yield Input(fmt_num(g.target), placeholder="target", type="number", id="target")
 
     def submit(self) -> None:
-        title = self.value("title").strip()
-        if not title:
-            return self.error("Goal title is required.")
         try:
-            baseline, target = parse_float(self.value("baseline")), parse_float(self.value("target"))
-        except ValueError:
-            return self.error("Baseline and target must be numbers.")
-        if baseline is not None and target is None:
-            return self.error("Add a target, or clear the baseline.")
-        self.dismiss(
-            replace(
-                self.goal,
-                title=title,
-                why=self.value("why").strip(),
-                unit=self.value("unit").strip() or None,
-                baseline=baseline,
-                target=target,
-            )
-        )
+            self.dismiss(parse_goal_form(self.goal, {k: self.value(k) for k in self.FIELDS}))
+        except FormError as e:
+            self.error(str(e))
 
 
 class TacticForm(FormModal):
     TITLE_TEXT = "Tactic"
+    FIELDS = ("title", "times", "start", "end")
 
     def __init__(self, tactic: Tactic, goal_title: str):
         super().__init__()
@@ -185,17 +166,7 @@ class TacticForm(FormModal):
             yield Input(str(t.end_week), type="integer", id="end")
 
     def submit(self) -> None:
-        title = self.value("title").strip()
-        if not title:
-            return self.error("Tactic title is required.")
         try:
-            times = parse_int(self.value("times"), 1)
-            start = parse_int(self.value("start"), 1)
-            end = parse_int(self.value("end"), EXECUTION_WEEKS)
-        except ValueError:
-            return self.error("Times and weeks must be whole numbers.")
-        if times < 1:
-            return self.error("Times per week must be at least 1.")
-        if not (1 <= start <= end <= EXECUTION_WEEKS):
-            return self.error(f"Weeks must satisfy 1 ≤ from ≤ to ≤ {EXECUTION_WEEKS}.")
-        self.dismiss(replace(self.tactic, title=title, times_per_week=times, start_week=start, end_week=end))
+            self.dismiss(parse_tactic_form(self.tactic, {k: self.value(k) for k in self.FIELDS}))
+        except FormError as e:
+            self.error(str(e))

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Vision{% endblock %}
+{% block content %}
+<h1>Vision</h1>
+<p class="muted">Your vision is the reason to do the hard tactics. Cover health, work, money, relationships and growth.</p>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="long_term">Long-term vision (10+ years)</label>
+  <textarea id="long_term" name="long_term" rows="7">{{ long_term }}</textarea>
+  <label for="three_year">3-year vision</label>
+  <textarea id="three_year" name="three_year" rows="7">{{ three_year }}</textarea>
+  <button class="btn primary block">Save vision</button>
+</form>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit goal" if goal.id else "New goal" }}{% endblock %}
+{% block content %}
+<h1>{{ "Edit goal" if goal.id else "New goal" }}</h1>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="title">Goal <span class="muted">(specific and measurable)</span></label>
+  <input id="title" name="title" value="{{ fields.title }}" placeholder="e.g. Lose 5 kg" required autofocus>
+  <label for="why">Why it matters</label>
+  <input id="why" name="why" value="{{ fields.why }}" placeholder="Link it to your vision">
+  <fieldset>
+    <legend>Lag measure <span class="muted">(optional)</span></legend>
+    <div class="grid3">
+      <div><label for="unit">Unit</label><input id="unit" name="unit" value="{{ fields.unit }}" placeholder="kg, books…"></div>
+      <div><label for="baseline">Start</label><input id="baseline" name="baseline" value="{{ fields.baseline }}" inputmode="decimal"></div>
+      <div><label for="target">Target</label><input id="target" name="target" value="{{ fields.target }}" inputmode="decimal"></div>
+    </div>
+    <p class="muted small">With a target, hit or missed is worked out at Week 13. Lower-is-better works too (82 → 77 kg).</p>
+  </fieldset>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <div class="row-buttons">
+    <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Cancel</a>
+    <button class="btn primary">Save goal</button>
+  </div>
+</form>
+{% endblock %}

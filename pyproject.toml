@@ -1,7 +1,7 @@
 [project]
 name = "twy"
 version = "0.1.0"
-description = "A terminal app for running The 12 Week Year"
+description = "A terminal and web app for running The 12 Week Year"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,11 +10,19 @@ dependencies = [
     "platformdirs>=4.0",
 ]
 
+[project.optional-dependencies]
+web = [
+    "flask>=3.0",
+    "gunicorn>=22.0",
+]
+
 [project.scripts]
 twy = "twy.__main__:main"
+twy-web = "twy.web.__main__:main"
 
 [dependency-groups]
 dev = [
+    "twy[web]",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_form.html" import post_button %}
+{% block title %}Plan · {{ cycle.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Plan</h1>
+  <span class="tag">{{ cycle.status }}</span>
+</div>
+<p class="muted">{{ cycle.name }}</p>
+
+<section class="card checks">
+  <h2>Checks</h2>
+  {% for w in warnings %}<p class="warn-line">⚠ {{ w }}</p>{% else %}<p class="ok-line">✓ Plan looks focused.</p>{% endfor %}
+  <h3>Items per week</h3>
+  <div class="load">
+    {% for week, n in load %}<div class="load-cell{{ ' heavy' if n > 15 }}{{ ' zero' if n == 0 }}"><span>{{ week }}</span><strong>{{ n }}</strong></div>{% endfor %}
+  </div>
+</section>
+
+{% for goal, tactics in goals %}
+<section class="card goal" id="goal-{{ goal.id }}">
+  <div class="goal-head">
+    <div>
+      <h2>{{ goal.title }}</h2>
+      {% if goal.measurable %}<p class="muted small">{{ goal.baseline|num or "?" }} → {{ goal.target|num }}{{ " " ~ goal.unit if goal.unit }}</p>{% endif %}
+      {% if goal.why %}<p class="why">{{ goal.why }}</p>{% endif %}
+    </div>
+    {% if not read_only %}
+    <div class="actions">
+      {{ post_button(url_for('web.goal_move', cycle_id=cycle.id, goal_id=goal.id), "↑", "Move goal up", delta=-1) }}
+      {{ post_button(url_for('web.goal_move', cycle_id=cycle.id, goal_id=goal.id), "↓", "Move goal down", delta=1) }}
+      <a class="icon-btn" href="{{ url_for('web.goal_edit', cycle_id=cycle.id, goal_id=goal.id) }}" title="Edit goal" aria-label="Edit goal">✎</a>
+      {{ post_button(url_for('web.goal_delete', cycle_id=cycle.id, goal_id=goal.id), "🗑", "Delete goal", confirm="Delete goal “" ~ goal.title ~ "” and all its tactics?") }}
+    </div>
+    {% endif %}
+  </div>
+  <ul class="tactics">
+    {% for t in tactics %}
+    <li id="tactic-{{ t.id }}">
+      <div>
+        <span>{{ t.title }}</span>
+        <span class="muted small">{{ t.times_per_week }}×/wk · weeks {{ t.start_week }}–{{ t.end_week }}</span>
+      </div>
+      {% if not read_only %}
+      <div class="actions">
+        {{ post_button(url_for('web.tactic_move', cycle_id=cycle.id, tactic_id=t.id), "↑", "Move tactic up", delta=-1) }}
+        {{ post_button(url_for('web.tactic_move', cycle_id=cycle.id, tactic_id=t.id), "↓", "Move tactic down", delta=1) }}
+        <a class="icon-btn" href="{{ url_for('web.tactic_edit', cycle_id=cycle.id, tactic_id=t.id) }}" title="Edit tactic" aria-label="Edit tactic">✎</a>
+        {{ post_button(url_for('web.tactic_delete', cycle_id=cycle.id, tactic_id=t.id), "🗑", "Delete tactic", confirm="Delete tactic “" ~ t.title ~ "”? Its past weekly scores are removed too.") }}
+      </div>
+      {% endif %}
+    </li>
+    {% else %}
+    <li class="muted">No tactics yet. Tactics are actions you control, done a set number of times each week.</li>
+    {% endfor %}
+  </ul>
+  {% if not read_only %}<a class="btn small" href="{{ url_for('web.tactic_new', cycle_id=cycle.id, goal_id=goal.id) }}">+ Add tactic</a>{% endif %}
+</section>
+{% else %}
+<section class="card empty"><p>No goals yet. 1–3 goals is ideal: specific, measurable, and tied to your vision.</p></section>
+{% endfor %}
+
+{% if not read_only %}
+<a class="btn block" href="{{ url_for('web.goal_new', cycle_id=cycle.id) }}">+ Add goal</a>
+{% if cycle.status == "planning" %}
+<form method="post" action="{{ url_for('web.start_cycle', cycle_id=cycle.id) }}">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <button class="btn primary block" {{ 'disabled' if not has_tactics }}>Start cycle</button>
+  {% if not has_tactics %}<p class="muted small center">Add at least one tactic to start.</p>{% endif %}
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

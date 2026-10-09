@@ -106,5 +106,19 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if str(path) != ":memory:":
+        # WAL + a busy timeout let the web app and a terminal session write the same file.
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
     migrate(conn)
     return conn
+
+
+def backup_to(conn: sqlite3.Connection, path: Path | str) -> None:
+    """Write a consistent single-file copy of the database (safe while it is in use)."""
+    dest = sqlite3.connect(str(path))
+    try:
+        conn.backup(dest)
+        dest.execute("PRAGMA journal_mode = DELETE")
+    finally:
+        dest.close()

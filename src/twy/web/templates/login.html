@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block body_class %}bare{% endblock %}
+{% block chrome %}{% endblock %}
+{% block content %}
+<form method="post" class="card login">
+  <img class="login-mark" src="{{ url_for('static', filename='icon.svg') }}" alt="">
+  <h1>12 Week Year</h1>
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <button class="btn primary block">Log in</button>
+  <p class="muted small">You'll stay logged in on this device for 30 days.</p>
+</form>
+{% endblock %}
