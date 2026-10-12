@@ -4,7 +4,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static, Tree
 
 from twy.domain.dates import EXECUTION_WEEKS
-from twy.domain.guardrails import plan_warnings
+from twy.domain.guardrails import heavy_weeks, plan_warnings
 from twy.domain.scoring import planned_items
 from twy.models import Goal, Tactic
 from twy.screens.base import TwyScreen, fmt_num
@@ -77,11 +77,14 @@ class PlanScreen(TwyScreen):
         if target_node is not None:
             self.call_after_refresh(tree.move_cursor, target_node)
 
-        warnings = plan_warnings(goals, tactics)
+        limit = self.app.repo.max_weekly_items
+        warnings = plan_warnings(goals, tactics, limit)
         self.query_one("#warnings", Static).update(
             "[b]Checks[/b]\n" + ("\n".join(f"[yellow]⚠[/yellow] {w}" for w in warnings) or "[green]✓ Plan looks focused.[/green]")
         )
-        load = "  ".join(f"{w}:{planned_items(tactics, w)}" for w in range(1, EXECUTION_WEEKS + 1))
+        heavy = set(heavy_weeks(tactics, limit))
+        cells = (f"{w}:{planned_items(tactics, w)}" for w in range(1, EXECUTION_WEEKS + 1))
+        load = "  ".join(f"[yellow]{c}[/yellow]" if w in heavy else c for w, c in enumerate(cells, start=1))
         self.query_one("#load", Static).update(f"[b]Items per week[/b]\n{load}")
 
     # -- selection helpers --------------------------------------------------------

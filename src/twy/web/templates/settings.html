@@ -9,6 +9,10 @@
     {% for name in weekdays %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == week_start }}>{{ name }}</option>{% endfor %}
   </select>
   <p class="muted small">Applies to new cycles. Existing cycles keep their dates.</p>
+  <label for="max_weekly_items">Max items per week</label>
+  <input id="max_weekly_items" name="max_weekly_items" type="number" inputmode="numeric" min="1" max="200" required value="{{ max_weekly_items }}">
+  <p class="muted small">Weeks with more planned items get a “heavy week” warning on the Plan page. A 5×/week tactic counts as 5 items.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn primary block">Save</button>
 </form>
 <section class="card stack">

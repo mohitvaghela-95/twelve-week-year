@@ -1,9 +1,10 @@
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Button, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static
 
 from twy.domain.dates import WEEKDAY_NAMES
 from twy.screens.base import TwyScreen
+from twy.services import FormError, parse_max_weekly_items
 
 
 class SettingsScreen(TwyScreen):
@@ -29,6 +30,9 @@ class SettingsScreen(TwyScreen):
                 id="week-start",
             )
             yield Static("Applies to new cycles; existing cycles keep their dates.", classes="muted")
+            yield Label("Max items per week", classes="section")
+            yield Input(str(self.app.repo.max_weekly_items), type="integer", id="max-items")
+            yield Static("Weeks above this get a heavy-week warning. A 5×/week tactic counts as 5.", classes="muted")
             yield Static(f"Data file: {self.app.db_path}", classes="muted")
             yield Button("Save" if not self.onboarding else "Next: vision →", variant="primary", id="save")
 
@@ -37,8 +41,14 @@ class SettingsScreen(TwyScreen):
 
     def action_save(self) -> None:
         value = self.query_one("#week-start", Select).value
+        try:
+            limit = parse_max_weekly_items(self.query_one("#max-items", Input).value)
+        except FormError as e:
+            self.notify(str(e), severity="error")
+            return
         self.app.repo.set_setting("week_start", str(value))
-        self.notify(f"Weeks start on {WEEKDAY_NAMES[value]}.")
+        self.app.repo.set_setting("max_weekly_items", str(limit))
+        self.notify(f"Saved. Weeks start on {WEEKDAY_NAMES[value]}.")
         if self.onboarding:
             from twy.screens.vision import VisionScreen
 

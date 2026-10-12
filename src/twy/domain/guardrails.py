@@ -6,10 +6,18 @@ from twy.models import Goal, Tactic
 
 MAX_GOALS = 3
 MAX_TACTICS = 8
-MAX_WEEKLY_ITEMS = 15
+# A 5x/week tactic counts as 5 items, so 3 goals with a daily habit each reach ~25 quickly.
+DEFAULT_MAX_WEEKLY_ITEMS = 25
 
 
-def plan_warnings(goals: list[Goal], tactics: list[Tactic]) -> list[str]:
+def heavy_weeks(tactics: list[Tactic], limit: int) -> list[int]:
+    """Execution weeks whose planned items exceed the user's limit."""
+    return [w for w in range(1, EXECUTION_WEEKS + 1) if planned_items(tactics, w) > limit]
+
+
+def plan_warnings(
+    goals: list[Goal], tactics: list[Tactic], max_weekly_items: int = DEFAULT_MAX_WEEKLY_ITEMS
+) -> list[str]:
     warnings: list[str] = []
     if len(goals) > MAX_GOALS:
         warnings.append(f"{len(goals)} goals: the book recommends 1–{MAX_GOALS}.")
@@ -27,8 +35,8 @@ def plan_warnings(goals: list[Goal], tactics: list[Tactic]) -> list[str]:
         ):
             warnings.append(f"Tactic “{t.title}” has an invalid week range ({t.start_week}–{t.end_week}).")
 
-    heavy = [w for w in range(1, EXECUTION_WEEKS + 1) if planned_items(tactics, w) > MAX_WEEKLY_ITEMS]
+    heavy = heavy_weeks(tactics, max_weekly_items)
     if heavy:
         weeks = ", ".join(str(w) for w in heavy)
-        warnings.append(f"Heavy weeks (> {MAX_WEEKLY_ITEMS} items): {weeks}.")
+        warnings.append(f"Heavy weeks (> {max_weekly_items} items): {weeks}.")
     return warnings

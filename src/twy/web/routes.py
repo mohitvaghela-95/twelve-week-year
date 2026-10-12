@@ -10,7 +10,7 @@ from flask import Blueprint, abort, current_app, flash, g, redirect, render_temp
 
 from twy.db import backup_to, connect
 from twy.domain.dates import EXECUTION_WEEKS, WEEKDAY_NAMES, align_to_week_start, current_week, cycle_end, week_range
-from twy.domain.guardrails import plan_warnings
+from twy.domain.guardrails import heavy_weeks, plan_warnings
 from twy.domain.scoring import cycle_average, execution_score, format_score, goal_outcome, planned_items
 from twy.models import Cycle, Goal, Tactic
 from twy.repo import Repo
@@ -25,6 +25,7 @@ from twy.services import (
     parse_float,
     parse_goal_form,
     parse_int,
+    parse_max_weekly_items,
     parse_tactic_form,
     previous_cycle_id,
     review_rows,
@@ -274,13 +275,15 @@ def plan(cycle_id: int):
     cycle = load_cycle(cycle_id)
     goals = r.list_goals(cycle.id)
     tactics = r.list_tactics(cycle.id)
+    limit = r.max_weekly_items
+    heavy = set(heavy_weeks(tactics, limit))
     return render_template(
         "plan.html",
         cycle=cycle,
         goals=[(g, [t for t in tactics if t.goal_id == g.id]) for g in goals],
         has_tactics=bool(tactics),
-        warnings=plan_warnings(goals, tactics),
-        load=[(w, planned_items(tactics, w)) for w in range(1, EXECUTION_WEEKS + 1)],
+        warnings=plan_warnings(goals, tactics, limit),
+        load=[(w, planned_items(tactics, w), w in heavy) for w in range(1, EXECUTION_WEEKS + 1)],
         read_only=cycle.status == "closed",
         tab="plan",
     )
@@ -566,17 +569,27 @@ def vision():
 @bp.route("/settings", methods=["GET", "POST"])
 def settings():
     r = repo()
+    week_start, max_items, error = r.week_start, str(r.max_weekly_items), None
     if request.method == "POST":
         week_start = request.form.get("week_start", type=int)
         if week_start is None or not 0 <= week_start <= 6:
             abort(400)
-        r.set_setting("week_start", str(week_start))
-        flash(f"Weeks start on {WEEKDAY_NAMES[week_start]}.")
-        return redirect(url_for(".settings"))
+        max_items = request.form.get("max_weekly_items", "")
+        try:
+            limit = parse_max_weekly_items(max_items)
+        except FormError as e:
+            error = str(e)
+        else:
+            r.set_setting("week_start", str(week_start))
+            r.set_setting("max_weekly_items", str(limit))
+            flash(f"Settings saved. Weeks start on {WEEKDAY_NAMES[week_start]}.")
+            return redirect(url_for(".settings"))
     return render_template(
         "settings.html",
         weekdays=WEEKDAY_NAMES,
-        week_start=r.week_start,
+        week_start=week_start,
+        max_weekly_items=max_items,
+        error=error,
         db_path=current_app.config["TWY_DB"],
         tab="more",
     )

@@ -175,3 +175,28 @@ def test_every_page_renders(client):
     post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
     for url in ["/c/1", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/cycles", "/vision", "/settings", "/more"]:
         assert client.get(url).status_code == 200, url
+
+
+def test_heavy_week_limit_setting(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
+    repo = repo_for(db_path)
+    cycle = repo.current_cycle()
+    post(client, f"/c/{cycle.id}/goals/new", {"title": "AI engineer offer"})
+    goal = repo.list_goals(cycle.id)[0]
+    post(client, f"/c/{cycle.id}/goals/{goal.id}/tactics/new", {"title": "Study", "times": "5", "start": "1", "end": "12"})
+
+    assert repo.max_weekly_items == 25
+    assert 'value="25"' in client.get("/settings").text
+    page = client.get(f"/c/{cycle.id}/plan").text
+    assert "Heavy weeks" not in page and "load-cell heavy" not in page
+
+    response = post(client, "/settings", {"week_start": "0", "max_weekly_items": "abc"})
+    assert response.status_code == 200 and "whole number" in response.text
+    assert repo.max_weekly_items == 25  # nothing saved
+
+    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4"}).status_code == 302
+    assert repo.max_weekly_items == 4
+    page = client.get(f"/c/{cycle.id}/plan").text
+    assert "Heavy weeks (&gt; 4 items)" in page and "load-cell heavy" in page

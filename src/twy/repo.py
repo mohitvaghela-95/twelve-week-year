@@ -3,6 +3,7 @@
 import sqlite3
 from datetime import date, datetime
 
+from twy.domain.guardrails import DEFAULT_MAX_WEEKLY_ITEMS
 from twy.domain.scoring import execution_score
 from twy.models import Cycle, CycleReview, Goal, Tactic, WeekEntry, WeekReview
 
@@ -70,6 +71,10 @@ class Repo:
     @property
     def week_start(self) -> int:
         return int(self.get_setting("week_start", "0"))
+
+    @property
+    def max_weekly_items(self) -> int:
+        return int(self.get_setting("max_weekly_items", str(DEFAULT_MAX_WEEKLY_ITEMS)))
 
     @property
     def is_configured(self) -> bool:

@@ -9,6 +9,7 @@ from twy.services import (
     cycle_status,
     default_review_week,
     parse_goal_form,
+    parse_max_weekly_items,
     parse_tactic_form,
     review_rows,
     reviewable_weeks,
@@ -108,3 +109,10 @@ def test_create_cycle_copies_plan(repo):
     nxt = create_cycle(repo, "Q1", date(2027, 1, 4), copy_from=cycle.id)
     assert [g.title for g in repo.list_goals(nxt.id)] == ["Lose 5 kg", "Ship it"]
     assert [t.title for t in repo.list_tactics(nxt.id)] == ["Run", "Launch"]
+
+
+def test_parse_max_weekly_items():
+    assert parse_max_weekly_items(" 30 ") == 30
+    for bad in ("0", "abc", "", "500", "2.5"):
+        with pytest.raises(FormError, match="Max items per week"):
+            parse_max_weekly_items(bad)

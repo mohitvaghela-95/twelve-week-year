@@ -40,6 +40,21 @@ def parse_int(text: str, default: int = 0) -> int:
     return int(text) if text else default
 
 
+MAX_WEEKLY_ITEMS_RANGE = (1, 200)
+
+
+def parse_max_weekly_items(text: str) -> int:
+    """The heavy-week limit from a settings form."""
+    low, high = MAX_WEEKLY_ITEMS_RANGE
+    try:
+        value = int(text.strip())
+    except ValueError:
+        raise FormError("Max items per week must be a whole number.") from None
+    if not low <= value <= high:
+        raise FormError(f"Max items per week must be between {low} and {high}.")
+    return value
+
+
 def fmt_num(value: float | None) -> str:
     if value is None:
         return ""
