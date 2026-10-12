@@ -61,7 +61,7 @@ if [[ $COPY_DB == 1 ]]; then
     echo "→ Copying $local_db"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
-    # A consistent single-file copy, even if the terminal app is open.
+    # A consistent single-file copy, even if something has the database open.
     uv run --quiet python -c 'import sys; from twy.db import backup_to, connect; backup_to(connect(sys.argv[1]), sys.argv[2])' \
         "$local_db" "$tmp/twy.db"
     scp -q "$tmp/twy.db" "$SERVER:$REMOTE_DIR/data/twy.db"
@@ -72,7 +72,7 @@ remote "cd '$REMOTE_DIR' && docker compose up -d --build"
 
 if [[ ! -f deploy.env ]]; then
     echo "TWY_SERVER=$SERVER" > deploy.env
-    echo "→ Saved the server in deploy.env: twy.command now opens the terminal app on the server."
+    echo "→ Saved the server in deploy.env, so next time just run scripts/deploy.sh."
 fi
 
 ip=$(remote "hostname -I 2>/dev/null | awk '{print \$1}'" || true)

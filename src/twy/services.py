@@ -1,7 +1,5 @@
-"""Rules shared by the terminal and web UIs. No Textual or Flask imports here.
-
-Both front ends call these so that review rows, banners, form validation and the
-Week 13 flow can't drift apart.
+"""App rules kept out of the Flask routes: review rows, banners, form validation and
+the Week 13 flow. No Flask imports here, so they stay easy to test.
 """
 
 from collections.abc import Mapping

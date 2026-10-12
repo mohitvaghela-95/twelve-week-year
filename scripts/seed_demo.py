@@ -1,7 +1,7 @@
 """Create a demo database with a cycle that is 7 weeks in and 6 weeks reviewed.
 
     TWY_DB=/tmp/twy-demo.db uv run python scripts/seed_demo.py
-    TWY_DB=/tmp/twy-demo.db uv run twy
+    TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
 """
 
 import random
