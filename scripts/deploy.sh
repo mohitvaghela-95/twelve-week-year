@@ -38,7 +38,7 @@ if ! remote "test -f '$REMOTE_DIR/.env'"; then
     remote "cd '$REMOTE_DIR' && sed -e \"s/^TWY_UID=.*/TWY_UID=\$(id -u)/\" -e \"s/^TWY_GID=.*/TWY_GID=\$(id -g)/\" .env.example > .env && chmod 600 .env"
     echo
     echo "Created ~/$REMOTE_DIR/.env on the server. Set TWY_PASSWORD in it (and TZ if needed):"
-    echo "    ssh $SERVER nano $REMOTE_DIR/.env"
+    echo "    ssh -t $SERVER nano $REMOTE_DIR/.env"
     echo "Then run this script again."
     exit 1
 fi

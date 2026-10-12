@@ -50,7 +50,7 @@ scripts/deploy.sh you@server-ip --copy-db
 The first run copies the project to `~/twy` on the server and creates `~/twy/.env`, then stops. Set a password in that file:
 
 ```bash
-ssh you@server-ip nano twy/.env
+ssh -t you@server-ip nano twy/.env
 ```
 
 Then run the same command again. It copies this Mac's database to the server once (`--copy-db`), builds the image, and starts it. Open `http://<server-ip>:8000` on your phone. In Safari, use Share → **Add to Home Screen** for an app-like icon.
