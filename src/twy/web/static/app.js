@@ -17,6 +17,46 @@
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
+  // Week chips: bring the selected week into view when the row scrolls.
+  document.querySelector(".weekpicker .chip.on")?.scrollIntoView({ block: "nearest", inline: "center" });
+
+  // Controls that only make sense with JavaScript.
+  document.querySelectorAll("[data-js-only]").forEach((el) => (el.hidden = false));
+
+  // Calendar time slots: add a row (next day, same time and length) or remove one.
+  document.addEventListener("click", (e) => {
+    const add = e.target.closest("[data-add-slot]");
+    if (add) {
+      const box = add.closest("[data-slots]");
+      const rows = box.querySelector("[data-slot-rows]");
+      const row = box.querySelector("[data-slot-template]").content.firstElementChild.cloneNode(true);
+      const last = rows.lastElementChild;
+      if (last) {
+        const field = (el, name) => el.querySelector(`[name="${name}"]`);
+        field(row, "slot_day").value = (Number(field(last, "slot_day").value) + 1) % 7;
+        field(row, "slot_time").value = field(last, "slot_time").value;
+        field(row, "slot_minutes").value = field(last, "slot_minutes").value;
+      }
+      rows.append(row);
+      row.querySelector("select").focus();
+      return;
+    }
+    const remove = e.target.closest("[data-remove-slot]");
+    if (remove) {
+      remove.closest(".slot-row").remove();
+      return;
+    }
+    // Copy the calendar link. navigator.clipboard needs HTTPS, so fall back to execCommand on the LAN.
+    const copy = e.target.closest("[data-copy]");
+    if (copy) {
+      const input = document.querySelector(copy.dataset.copy);
+      input.select();
+      const done = () => (copy.textContent = "Copied");
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(input.value).then(done);
+      else if (document.execCommand("copy")) done();
+    }
+  });
+
   // Confirm destructive actions (delete, close cycle).
   document.addEventListener("submit", (e) => {
     const message = e.submitter?.dataset.confirm || e.target.dataset.confirm;

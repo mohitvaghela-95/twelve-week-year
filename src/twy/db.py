@@ -78,6 +78,28 @@ MIGRATIONS: list[str] = [
         reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # v2: time blocks (admin, chores, ...) and weekly slots for tactics and blocks
+    """
+    CREATE TABLE block (
+        id       INTEGER PRIMARY KEY,
+        cycle_id INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 0,
+        title    TEXT NOT NULL,
+        kind     TEXT NOT NULL DEFAULT 'other'
+                 CHECK (kind IN ('admin', 'chores', 'breakout', 'review', 'other'))
+    );
+    CREATE TABLE slot (
+        id           INTEGER PRIMARY KEY,
+        tactic_id    INTEGER REFERENCES tactic(id) ON DELETE CASCADE,
+        block_id     INTEGER REFERENCES block(id) ON DELETE CASCADE,
+        weekday      INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0 = Monday
+        start_min    INTEGER NOT NULL CHECK (start_min BETWEEN 0 AND 1439),
+        duration_min INTEGER NOT NULL CHECK (duration_min BETWEEN 5 AND 720),
+        CHECK ((tactic_id IS NULL) != (block_id IS NULL))
+    );
+    CREATE INDEX slot_tactic ON slot (tactic_id);
+    CREATE INDEX slot_block ON slot (block_id);
+    """,
 ]
 
 
@@ -107,7 +129,7 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":
-        # WAL + a busy timeout let the web app and a terminal session write the same file.
+        # WAL + a busy timeout let gunicorn's threads write the same file safely.
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA journal_mode = WAL")
     migrate(conn)

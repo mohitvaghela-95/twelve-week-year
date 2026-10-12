@@ -1,93 +1,93 @@
-# twy: The 12 Week Year in your terminal and browser
+# twy: The 12 Week Year on your home network
 
-A keyboard-driven terminal app for running *The 12 Week Year* (Moran & Lennington): vision → 12-week goals → tactics → an end-of-week **execution score** with an **85%** target, then a Week 13 review.
+A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vision → 12-week goals → tactics → an end-of-week **execution score** with an **85%** target, then a Week 13 review. It runs in Docker on a home server, and one password protects it.
 
-## Install & run
+## What's in it
 
-```bash
-uv sync
-uv run twy
-```
+- **Home:** the current week, your last and average score, a mini trend, and goals with their lag measures.
+- **Plan:** goals and tactics, reordering, soft warnings and items per week, then **Start cycle**.
+- **Review:** a −/+ done count per tactic, a live score, lag values, obstacles and a fix.
+- **Trend:** a 12-week chart with the 85% line, plus weekly notes.
+- **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
+- **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged.
+- **Cycles, Vision, Settings:** past cycles are read-only. Settings has the backup download and the calendar link.
 
-On first run, twy asks for your week start day and your vision, then creates your first cycle.
+## Calendar
 
-## Keys
+Give a tactic **calendar times** (day, start time and minutes, e.g. Study: Mon–Fri 07:00 for 60 min). Add **time blocks** on the Plan page for admin, chores, breakout and your weekly review. Blocks belong to the cycle and are copied with "copy previous plan", but they aren't scored.
 
-| Key | Screen | |
-|---|---|---|
-| `d` / `Esc` | Dashboard | current week, last and average score, trend, goals |
-| `p` | Plan | `g` add goal · `a` add tactic · `e`/Enter edit · `⌫` delete · `[` `]` reorder · **Start cycle** |
-| `r` | Weekly review | done count per tactic, live score, reflections, lag values · `Ctrl+S` save |
-| `t` | Trend | 12-week chart with the 85% line plus weekly notes |
-| `w` | Week 13 | final values, hit/missed, lessons · **Close cycle & start next** |
-| `c` | Cycles | browse past cycles (closed cycles are read-only; `x` on the dashboard returns) |
-| `v` / `s` | Vision / Settings | |
-| `q` | Quit | |
+Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. From the day of your weekly review block, it also shows next week. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
 
 ## How scoring works
 
 - A tactic like "Run 3×/week" adds **3 items** to each week in its range.
 - Execution score = items done ÷ items planned. Weeks with nothing planned are skipped.
 - Each review **snapshots** what was planned, so later tactic edits don't rewrite past weeks. Deleting a tactic does remove it from history.
-- Goals can optionally have a lag measure (unit, baseline, target). Direction is inferred, so 82 → 77 kg means lower is better. Goals without a target are marked hit or missed by hand at Week 13.
-- Soft warnings: more than 3 goals, more than ~8 tactics, more than 15 items in a week, or a goal without tactics. They warn but never block.
+- Goals can optionally have a lag measure (unit, baseline, target). The direction is inferred, so 82 → 77 kg means lower is better. Goals without a target are marked hit or missed by hand at Week 13.
+- Soft warnings appear for more than 3 goals, more than ~8 tactics, more items in a week than your limit (Settings, default 25), or a goal with no tactics. They warn but never block.
 
-## Web app on your home server
-
-The same app as a phone-friendly web page you can use from any device on your home network. It covers everything the terminal app does: dashboard, plan, weekly review with −/+ steppers and a live score, trend, Week 13, cycles, vision and settings. One password protects it, and each device stays logged in for 30 days.
+## Running it on your home server
 
 ### What you need
 
-- A Linux PC or mini PC on your home network with Docker and the compose plugin, and SSH access to it from this Mac. Your server user must be able to run `docker` (add it to the `docker` group).
-- Give the server a fixed IP address with a DHCP reservation on your router, so the address doesn't change.
+- A Linux PC or mini PC on your home network with Docker and the compose plugin. Your server user must be able to run `docker`, so add it to the `docker` group.
+- A fixed IP address for the server. Set up a DHCP reservation on your router so the address doesn't change.
 
-### First deploy
+### Option A: git
+
+On the server:
 
 ```bash
-scripts/deploy.sh you@server-ip --copy-db
+git clone https://github.com/mohitvaghela-95/twelve-week-year.git ~/twy
+cd ~/twy
+cp .env.example .env
+sed -i "s/^TWY_UID=.*/TWY_UID=$(id -u)/; s/^TWY_GID=.*/TWY_GID=$(id -g)/" .env
+mkdir -p data
+nano .env
+docker compose up -d --build
 ```
 
-The first run copies the project to `~/twy` on the server and creates `~/twy/.env`, then stops. Set a password in that file:
+In `nano`, set `TWY_PASSWORD`. Create `data/` **before** the first `docker compose up`. Otherwise Docker creates it owned by root, and the app can't open its database.
+
+To update, run this in `~/twy`:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+### Option B: rsync from this Mac
+
+```bash
+scripts/deploy.sh you@server-ip
+```
+
+The first run copies the project to `~/twy`, creates `.env` and stops. Set the password, then run the script again:
 
 ```bash
 ssh -t you@server-ip nano twy/.env
 ```
 
-Then run the same command again. It copies this Mac's database to the server once (`--copy-db`), builds the image, and starts it. Open `http://<server-ip>:8000` on your phone. In Safari, use Share → **Add to Home Screen** for an app-like icon.
+`deploy.sh` saves the server in `deploy.env`, so later updates are just `scripts/deploy.sh`. It never touches the server's `data/` folder or `.env`.
 
-The server is now where your data lives. `deploy.sh` saves the server in `deploy.env`, so the Desktop alias (`twy.command`) opens the terminal app on the server over SSH (`docker exec -it twy twy`).
+### Then
 
-### Updating
-
-Run `scripts/deploy.sh` again; it remembers the server. It never touches the server's `data/` folder or `.env`.
+Open `http://<server-ip>:8000` on your phone. In Safari, choose Share → **Add to Home Screen** to get an app-like icon.
 
 ### Good to know
 
-- **Home network only.** It uses plain HTTP, so don't forward port 8000 on your router. For access away from home, use a VPN into your network (such as Tailscale or WireGuard) rather than exposing it.
+- **Home network only.** It uses plain HTTP, so don't forward port 8000 on your router. To use it away from home, set up a VPN into your network (such as Tailscale or WireGuard) rather than exposing the app.
 - **Backups:** Settings → **Download backup** saves a copy of the database. The live file is `~/twy/data/twy.db` on the server.
-- **Settings** live in `~/twy/.env`: `TWY_PASSWORD`, `TZ` (so "today" matches your clock), `TWY_PORT`. Run `docker compose up -d` in `~/twy` after changing them.
-- **Logs:** `docker compose logs -f` in `~/twy`.
+- **Settings** live in `~/twy/.env`: `TWY_PASSWORD`, `TZ` (so "today" matches your clock) and `TWY_PORT`. After changing them, run `docker compose up -d` in `~/twy`.
+- **Logs:** run `docker compose logs -f` in `~/twy`.
 
-### Try it on this Mac
-
-```bash
-TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
-```
-
-Then open http://localhost:8000.
-
-## Data
-
-Everything lives in one SQLite file: `~/Library/Application Support/twy/twy.db` on macOS (the Settings screen shows the path). To back up, copy that file. Set `TWY_DB=/path/to/file.db` to use a different file.
-
-## Try it with demo data
+## Try it on this Mac
 
 ```bash
 TWY_DB=/tmp/twy-demo.db uv run python scripts/seed_demo.py
-TWY_DB=/tmp/twy-demo.db uv run twy
+TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
 ```
 
-`TWY_TODAY=2026-11-20` pretends today is another date, which is useful for trying the Week 13 flow.
+Then open http://localhost:8000. To try the Week 13 flow, set `TWY_TODAY=2026-11-20` to pretend today is a different date.
 
 ## Development
 
@@ -95,4 +95,9 @@ TWY_DB=/tmp/twy-demo.db uv run twy
 uv run pytest
 ```
 
-Layout: `domain/` (pure week math, scoring, guardrails) · `repo.py` (all SQL) · `services.py` (rules shared by both UIs) · `screens/` + `widgets/` (Textual UI) · `web/` (Flask app, templates, static files) · `Dockerfile` + `compose.yaml` + `scripts/deploy.sh` (home server).
+The code is laid out as follows:
+- `domain/`: pure week math, scoring and guardrails.
+- `repo.py`: all the SQL.
+- `services.py`: the app rules, kept out of the routes.
+- `web/`: the Flask app, templates and static files.
+- `Dockerfile`, `compose.yaml` and `scripts/deploy.sh`: the home server setup.

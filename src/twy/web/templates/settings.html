@@ -12,9 +12,26 @@
   <label for="max_weekly_items">Max items per week</label>
   <input id="max_weekly_items" name="max_weekly_items" type="number" inputmode="numeric" min="1" max="200" required value="{{ max_weekly_items }}">
   <p class="muted small">Weeks with more planned items get a “heavy week” warning on the Plan page. A 5×/week tactic counts as 5 items.</p>
+  <label for="alert_minutes">Calendar alert</label>
+  <div class="with-unit"><input id="alert_minutes" name="alert_minutes" type="number" inputmode="numeric" min="0" max="1440" required value="{{ alert_minutes }}"><span class="muted">minutes before (0 = none)</span></div>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn primary block">Save</button>
 </form>
+<section class="card stack" id="calendar">
+  <h2>Calendar</h2>
+  <p class="muted small">Subscribe once and this week's tactic sessions and time blocks appear in Calendar on your iPhone, iPad or Mac. From the day of your weekly review block, next week shows too. It refreshes on its own while the device is on your home Wi-Fi.</p>
+  <a class="btn primary block" href="{{ webcal_url }}">Subscribe on this device</a>
+  <label for="feed_url">Calendar link</label>
+  <div class="copy-row">
+    <input id="feed_url" value="{{ feed_url }}" readonly>
+    <button type="button" class="btn" data-copy="#feed_url" data-js-only hidden>Copy</button>
+  </div>
+  <p class="muted small">On a Mac: Calendar → File → New Calendar Subscription, then paste the link. Keep it private: anyone with the link can read your schedule.</p>
+  <form method="post" action="{{ url_for('web.calendar_reset') }}" data-confirm="Create a new link? Devices subscribed with the old one stop updating.">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn warn">Reset link</button>
+  </form>
+</section>
 <section class="card stack">
   <h2>Backup</h2>
   <p class="muted small">Everything lives in one SQLite file on the server:<br><code>{{ db_path }}</code></p>

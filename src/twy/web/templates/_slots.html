@@ -1,0 +1,24 @@
+{#- Weekly slot editor shared by the tactic and block forms. Import "with context" (needs WEEKDAY_SHORT). -#}
+{% macro slot_row(row) -%}
+<div class="slot-row">
+  <select name="slot_day" aria-label="Day">
+    {%- for name in WEEKDAY_SHORT %}<option value="{{ loop.index0 }}" {{ 'selected' if row.day == loop.index0|string }}>{{ name }}</option>{% endfor -%}
+  </select>
+  <input name="slot_time" type="time" value="{{ row.time }}" aria-label="Start time">
+  <input name="slot_minutes" type="number" min="5" max="720" step="5" inputmode="numeric" value="{{ row.minutes }}" aria-label="Length in minutes">
+  <button type="button" class="icon-btn" data-remove-slot data-js-only hidden title="Remove slot" aria-label="Remove slot">✕</button>
+</div>
+{%- endmacro %}
+
+{% macro slot_editor(rows, hint) -%}
+<fieldset class="slots" data-slots>
+  <legend>Calendar times</legend>
+  <p class="muted small">{{ hint }} Clear a row's time to remove it.</p>
+  <div class="slot-row slot-head muted small" aria-hidden="true"><span>Day</span><span>Start</span><span>Minutes</span><span></span></div>
+  <div data-slot-rows>
+    {%- for row in rows %}{{ slot_row(row) }}{% endfor -%}
+  </div>
+  <template data-slot-template>{{ slot_row({"day": rows[-1].day if rows else "0", "time": "", "minutes": "60"}) }}</template>
+  <button type="button" class="btn small" data-add-slot data-js-only hidden>+ Add time</button>
+</fieldset>
+{%- endmacro %}

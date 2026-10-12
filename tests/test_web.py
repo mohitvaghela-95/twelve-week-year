@@ -173,7 +173,7 @@ def test_every_page_renders(client):
     login(client)
     post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
     post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
-    for url in ["/c/1", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/cycles", "/vision", "/settings", "/more"]:
+    for url in ["/c/1", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/c/1/week/1", "/c/1/blocks/new", "/cycles", "/vision", "/settings", "/more"]:
         assert client.get(url).status_code == 200, url
 
 
@@ -192,11 +192,62 @@ def test_heavy_week_limit_setting(client, db_path):
     page = client.get(f"/c/{cycle.id}/plan").text
     assert "Heavy weeks" not in page and "load-cell heavy" not in page
 
-    response = post(client, "/settings", {"week_start": "0", "max_weekly_items": "abc"})
+    response = post(client, "/settings", {"week_start": "0", "max_weekly_items": "abc", "alert_minutes": "10"})
     assert response.status_code == 200 and "whole number" in response.text
     assert repo.max_weekly_items == 25  # nothing saved
 
-    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4"}).status_code == 302
+    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4", "alert_minutes": "10"}).status_code == 302
     assert repo.max_weekly_items == 4
     page = client.get(f"/c/{cycle.id}/plan").text
     assert "Heavy weeks (&gt; 4 items)" in page and "load-cell heavy" in page
+
+
+def test_schedule_week_page_and_calendar_feed(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-12"})  # TODAY (Wed 14 Oct) is in week 1
+    repo = repo_for(db_path)
+    cycle = repo.current_cycle()
+    base = f"/c/{cycle.id}"
+    post(client, f"{base}/goals/new", {"title": "AI engineer offer"})
+    goal = repo.list_goals(cycle.id)[0]
+    tactic = {"title": "Study", "times": "5", "start": "1", "end": "12"}
+
+    # A bad slot re-shows the form with what was typed.
+    bad = {**tactic, "slot_day": ["0"], "slot_time": ["7am"], "slot_minutes": ["60"]}
+    response = post(client, f"{base}/goals/{goal.id}/tactics/new", bad)
+    assert response.status_code == 422 and "Slot 1" in response.text and 'value="7am"' in response.text
+    assert repo.list_tactics(cycle.id) == []
+
+    good = {**tactic, "slot_day": ["0", "2", "4"], "slot_time": ["07:00", "07:00", ""], "slot_minutes": ["60"] * 3}
+    post(client, f"{base}/goals/{goal.id}/tactics/new", good)
+    study = repo.list_tactics(cycle.id)[0]
+    assert [s.label for s in repo.list_slots("tactic_id", study.id)] == ["Mon 07:00–08:00", "Wed 07:00–08:00"]
+    plan = client.get(f"{base}/plan").text
+    assert "Mon 07:00–08:00 · Wed 07:00–08:00" in plan
+    assert "has 2 slots in the calendar but is planned 5×/week" in plan
+
+    assert 'value="Weekly review"' in client.get(f"{base}/blocks/new?kind=review").text
+    review = {"title": "Weekly review", "kind": "review", "slot_day": ["6"], "slot_time": ["18:00"], "slot_minutes": ["30"]}
+    assert post(client, f"{base}/blocks/new", review).status_code == 302
+    admin = {"title": "Admin", "kind": "admin", "slot_day": ["0"], "slot_time": ["07:30"], "slot_minutes": ["30"]}
+    post(client, f"{base}/blocks/new", admin)  # clashes with Monday's study session
+    assert [b.title for b in repo.list_blocks(cycle.id)] == ["Weekly review", "Admin"]
+
+    assert client.get(f"{base}/week").location == f"{base}/week/1"
+    page = client.get(f"{base}/week/1").text
+    assert "Weekly review" in page and "2 overlapping" in page and "4 sessions" in page
+    assert client.get(f"{base}/week/14").status_code == 404
+
+    # The feed: secret link, no login, this week only (today is before the Sunday review).
+    token = repo.calendar_token
+    assert f"webcal://localhost/calendar/{token}.ics" in client.get("/settings").text
+    calendar_app = client.application.test_client()
+    assert calendar_app.get("/calendar/wrong.ics").status_code == 404
+    feed = calendar_app.get(f"/calendar/{token}.ics")
+    assert feed.status_code == 200 and feed.mimetype == "text/calendar"
+    assert feed.text.count("BEGIN:VEVENT") == 4
+    assert "SUMMARY:Study" in feed.text and "TRIGGER:-PT10M" in feed.text
+
+    post(client, "/settings/calendar/reset")
+    assert calendar_app.get(f"/calendar/{token}.ics").status_code == 404

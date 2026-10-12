@@ -1,4 +1,4 @@
-# twy: the web app (gunicorn) plus the terminal app, for `docker exec -it twy twy`.
+# twy: the web app, served by gunicorn.
 FROM python:3.12-slim
 
 RUN apt-get update \
@@ -14,15 +14,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 # Dependencies first so code changes don't reinstall them.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra web --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN uv sync --frozen --no-dev --extra web --no-editable
+RUN uv sync --frozen --no-dev --no-editable
 
 RUN useradd --uid 1000 --create-home twy && mkdir /data && chown twy /data
 USER twy
 ENV TWY_DB=/data/twy.db \
     PYTHONUNBUFFERED=1 \
-    TERM=xterm-256color \
     HOME=/tmp
 VOLUME /data
 EXPOSE 8000

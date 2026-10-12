@@ -2,14 +2,17 @@ from datetime import date, timedelta
 
 import pytest
 
-from twy.models import Goal, Tactic
+from twy.models import Block, Goal, Tactic
 from twy.services import (
     FormError,
     create_cycle,
     cycle_status,
     default_review_week,
+    parse_alert_minutes,
+    parse_block_form,
     parse_goal_form,
     parse_max_weekly_items,
+    parse_slots,
     parse_tactic_form,
     review_rows,
     reviewable_weeks,
@@ -116,3 +119,38 @@ def test_parse_max_weekly_items():
     for bad in ("0", "abc", "", "500", "2.5"):
         with pytest.raises(FormError, match="Max items per week"):
             parse_max_weekly_items(bad)
+
+
+def test_parse_slots():
+    slots = parse_slots(["4", "0", "2"], ["18:00:00", "", "07:30"], ["30", "60", "45"])
+    assert [(s.weekday, s.start_min, s.duration_min) for s in slots] == [(2, 450, 45), (4, 1080, 30)]
+    cases = [
+        (["0"], ["7am"], ["60"], "Slot 1: use a time"),
+        (["0", "9"], ["07:00", "08:00"], ["60", "60"], "Slot 2: pick a day"),
+        (["0"], ["07:00"], ["3"], "5–720"),
+        (["0"], ["23:30"], ["60"], "midnight"),
+    ]
+    for days, times, minutes, message in cases:
+        with pytest.raises(FormError, match=message):
+            parse_slots(days, times, minutes)
+
+
+def test_parse_alert_minutes():
+    assert parse_alert_minutes("0") == 0
+    assert parse_alert_minutes(" 15 ") == 15
+    for bad in ("", "x", "-5", "1441"):
+        with pytest.raises(FormError, match="Alert"):
+            parse_alert_minutes(bad)
+
+
+def test_parse_block_form():
+    block = Block(id=None, cycle_id=1, title="")
+    slots = parse_slots(["6"], ["18:00"], ["30"])
+    parsed = parse_block_form(block, {"title": " Weekly review ", "kind": "review"}, slots)
+    assert (parsed.title, parsed.kind, len(parsed.slots)) == ("Weekly review", "review", 1)
+    with pytest.raises(FormError, match="title"):
+        parse_block_form(block, {"title": "", "kind": "admin"}, slots)
+    with pytest.raises(FormError, match="kind"):
+        parse_block_form(block, {"title": "x", "kind": "nap"}, slots)
+    with pytest.raises(FormError, match="time slot"):
+        parse_block_form(block, {"title": "x", "kind": "admin"}, [])

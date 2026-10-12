@@ -8,7 +8,7 @@ from flask import Blueprint, Flask, abort, current_app, redirect, render_templat
 
 bp = Blueprint("auth", __name__)
 
-PUBLIC_ENDPOINTS = {"auth.login", "web.healthz", "static"}
+PUBLIC_ENDPOINTS = {"auth.login", "web.healthz", "web.calendar_feed", "static"}
 
 
 def csrf_token() -> str:

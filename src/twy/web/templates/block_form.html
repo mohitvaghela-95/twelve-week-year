@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_slots.html" import slot_editor with context %}
+{% block title %}{{ "Edit block" if block.id else "New block" }}{% endblock %}
+{% block content %}
+<h1>{{ "Edit block" if block.id else "New block" }}</h1>
+<p class="muted">Time you protect each week. It goes in your calendar but isn't scored.</p>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="title">Name</label>
+  <input id="title" name="title" value="{{ fields.title }}" placeholder="e.g. Admin & email" required {{ 'autofocus' if not fields.title }}>
+  <label for="kind">Kind</label>
+  <select id="kind" name="kind">
+    {% for key, label in kinds.items() %}<option value="{{ key }}" {{ 'selected' if fields.kind == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <p class="muted small">From the day of your <strong>Weekly review</strong> block, the calendar also shows next week.</p>
+  {{ slot_editor(slot_rows, "When this block happens each week.") }}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <div class="row-buttons">
+    <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id, _anchor='blocks') }}">Cancel</a>
+    <button class="btn primary">Save block</button>
+  </div>
+</form>
+{% endblock %}
