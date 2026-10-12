@@ -88,15 +88,22 @@ def sessions_for_week(
     return sorted(sessions, key=lambda s: (s.day, s.start_min, s.title))
 
 
-def overlaps(sessions: Iterable[Session]) -> set[str]:
-    """UIDs of sessions that clash with another session on the same day."""
-    clashing: set[str] = set()
+def overlaps(sessions: Iterable[Session]) -> dict[str, list[str]]:
+    """Sessions that clash with another on the same day: uid → titles of what they clash with."""
+    clashing: dict[str, list[str]] = {}
+
+    def note(s: Session, other: Session) -> None:
+        titles = clashing.setdefault(s.uid, [])
+        if other.title not in titles:
+            titles.append(other.title)
+
     ordered = sorted(sessions, key=lambda s: (s.day, s.start_min))
     for i, a in enumerate(ordered):
         for b in ordered[i + 1 :]:
             if b.day != a.day or b.start_min >= a.start_min + a.duration_min:
                 break
-            clashing.update((a.uid, b.uid))
+            note(a, b)
+            note(b, a)
     return clashing
 
 

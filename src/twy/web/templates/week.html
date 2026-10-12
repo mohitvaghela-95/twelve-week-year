@@ -42,7 +42,7 @@
     {% for s in items %}
     <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{% if not read_only %} href="{{ edit_url(s) }}"{% endif %}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
-      <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}{{ " · overlaps" if s.uid in clashes }}</span></span>
+      <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
     {% else %}
     <p class="muted small">Nothing scheduled.</p>
@@ -63,7 +63,7 @@
       {% for s in items %}
       {% set lane, count = layout[s.uid] %}
       <{{ session_tag(s) }} class="tl-item kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{% if not read_only %} href="{{ edit_url(s) }}"{% endif %}
-        title="{{ s.start_min|hhmm }}–{{ s.end_min|hhmm }} {{ s.title }}"
+        title="{{ s.start_min|hhmm }}–{{ s.end_min|hhmm }} {{ s.title }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
         style="top: {{ '%.3f' % ((s.start_min - lo) / span * 100) }}%; height: {{ '%.3f' % (s.duration_min / span * 100) }}%; --lane: {{ lane }}; --lanes: {{ count }}">
         <span class="time">{{ s.start_min|hhmm }}</span> {{ s.title }}
       </{{ session_tag(s) }}>

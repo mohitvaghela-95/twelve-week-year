@@ -39,11 +39,14 @@
       }
       rows.append(row);
       row.querySelector("select").focus();
+      box.dispatchEvent(new Event("change", { bubbles: true }));
       return;
     }
     const remove = e.target.closest("[data-remove-slot]");
     if (remove) {
+      const box = remove.closest("[data-slots]");
       remove.closest(".slot-row").remove();
+      box.dispatchEvent(new Event("change", { bubbles: true }));
       return;
     }
     // Copy the calendar link. navigator.clipboard needs HTTPS, so fall back to execCommand on the LAN.
@@ -55,6 +58,61 @@
       if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(input.value).then(done);
       else if (document.execCommand("copy")) done();
     }
+  });
+
+  // Calendar clashes: the server checks (one rule, in Python) and we show the answer under each row.
+  document.querySelectorAll("[data-check-url]").forEach((box) => {
+    const form = box.closest("form");
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      node.textContent = text;
+      return node;
+    };
+    const show = (row, result) => {
+      row.querySelector(".slot-note")?.remove();
+      if (!result) return;
+      const note = el("div", "slot-note", "");
+      note.setAttribute("role", "status");
+      result.clashes.forEach((text) => note.append(el("p", "", `⚠ ${text}`)));
+      const fixes = el("p", "slot-fixes", "");
+      [result.earlier, result.later].filter(Boolean).forEach((time) => {
+        const move = el("button", "btn small", `Move to ${time}`);
+        move.type = "button";
+        move.dataset.moveTo = time;
+        fixes.append(move);
+      });
+      if (result.no_gap) fixes.append(el("span", "muted", result.no_gap));
+      note.append(fixes);
+      row.append(note);
+    };
+    let timer;
+    let latest = 0;
+    const check = async () => {
+      const ticket = ++latest;
+      let data;
+      try {
+        const response = await fetch(box.dataset.checkUrl, { method: "POST", body: new FormData(form) });
+        data = await response.json();
+      } catch {
+        return; // offline, logged out or restarting: hints are optional
+      }
+      if (ticket !== latest) return; // an older answer arriving after a newer one
+      box.querySelectorAll("[data-slot-rows] > .slot-row").forEach((row, i) => show(row, data.rows[i]));
+    };
+    const soon = () => {
+      clearTimeout(timer);
+      timer = setTimeout(check, 300);
+    };
+    form.addEventListener("input", soon);
+    form.addEventListener("change", soon);
+    box.addEventListener("click", (e) => {
+      const move = e.target.closest("[data-move-to]");
+      if (!move) return;
+      move.closest(".slot-row").querySelector('[name="slot_time"]').value = move.dataset.moveTo;
+      check();
+    });
+    check();
   });
 
   // Confirm destructive actions (delete, close cycle).

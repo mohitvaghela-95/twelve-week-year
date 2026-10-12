@@ -10,7 +10,11 @@
 
 <section class="card checks">
   <h2>Checks</h2>
-  {% for w in warnings %}<p class="warn-line">⚠ {{ w }}</p>{% else %}<p class="ok-line">✓ Plan looks focused.</p>{% endfor %}
+  {% for w in warnings %}<p class="warn-line">⚠ {{ w }}</p>{% endfor %}
+  {% for c in clashes %}
+  <p class="warn-line">⚠ {% if read_only %}{{ c.text }}{% else %}<a href="{{ url_for('web.tactic_edit' if c.owner == 'tactic' else 'web.block_edit', cycle_id=cycle.id, **{c.owner ~ '_id': c.owner_id}) }}">{{ c.text }}</a>{% endif %}</p>
+  {% endfor %}
+  {% if not warnings and not clashes %}<p class="ok-line">✓ Plan looks focused.</p>{% endif %}
   <h3>Items per week</h3>
   <div class="load">
     {% for week, n, heavy in load %}<div class="load-cell{{ ' heavy' if heavy }}{{ ' zero' if n == 0 }}"><span>{{ week }}</span><strong>{{ n }}</strong></div>{% endfor %}

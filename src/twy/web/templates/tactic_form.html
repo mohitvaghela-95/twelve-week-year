@@ -14,7 +14,7 @@
     <div><label for="end">To week</label><input id="end" name="end" value="{{ fields.end }}" type="number" min="1" max="{{ EXECUTION_WEEKS }}" inputmode="numeric"></div>
   </div>
   <p class="muted small">“Run 3×/week” adds 3 items to each week in its range.</p>
-  {{ slot_editor(slot_rows, "Optional: when you'll do it each week, for the Week page and your calendar. Usually one time per “×/week”.") }}
+  {{ slot_editor(slot_rows, "Optional: when you'll do it each week, for the Week page and your calendar. Usually one time per “×/week”.", url_for('web.schedule_check_json', cycle_id=cycle.id), "tactic", tactic.id) }}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <div class="row-buttons">
     <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Cancel</a>

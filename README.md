@@ -16,6 +16,8 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 
 Give a tactic **calendar times** (day, start time and minutes, e.g. Study: Mon–Fri 07:00 for 60 min). Add **time blocks** on the Plan page for admin, chores, breakout and your weekly review. Blocks belong to the cycle and are copied with "copy previous plan", but they aren't scored.
 
+While you enter times, twy warns when one overlaps another tactic or block in a week where both run, and offers to **Move to** the nearest free time before or after. Free times are looked for between the hours in Settings → **Suggest times between** (default 06:00–22:00). Clashes never stop a save; any left over are listed on the Plan page.
+
 Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. From the day of your weekly review block, it also shows next week. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
 
 ## How scoring works

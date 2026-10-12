@@ -62,7 +62,7 @@ def test_overlaps_and_lanes():
     c = session(MON, 480, 30, 3)  # 08:00–08:30, touches a, clashes with b
     d = session(MON, 600, 30, 4)  # on its own
     e = session(MON + timedelta(days=1), 420, 60, 5)  # same time, another day
-    assert overlaps([a, b, c, d, e]) == {a.uid, b.uid, c.uid}
+    assert overlaps([a, b, c, d, e]) == {a.uid: ["s2"], b.uid: ["s1", "s3"], c.uid: ["s2"]}
     layout = lanes([a, b, c, d, e])
     assert (layout[a.uid], layout[b.uid], layout[c.uid]) == ((0, 2), (1, 2), (0, 2))
     assert layout[d.uid] == layout[e.uid] == (0, 1)

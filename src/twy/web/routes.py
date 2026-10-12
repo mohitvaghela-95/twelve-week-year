@@ -14,6 +14,7 @@ from flask import (
     current_app,
     flash,
     g,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -36,6 +37,7 @@ from twy.services import (
     default_review_week,
     fmt_num,
     parse_cycle_form,
+    parse_day_window,
     parse_float,
     parse_goal_form,
     parse_alert_minutes,
@@ -44,11 +46,13 @@ from twy.services import (
     parse_max_weekly_items,
     parse_slots,
     parse_tactic_form,
+    plan_clashes,
     previous_cycle_id,
     review_rows,
     reviewable_weeks,
     save_week,
     save_week13,
+    schedule_check,
     show_goal_outcomes,
     week_entries,
     week_sessions,
@@ -332,6 +336,7 @@ def plan(cycle_id: int):
         BLOCK_KINDS=BLOCK_KINDS,
         has_tactics=bool(tactics),
         warnings=plan_warnings(goals, tactics, limit, {tid: len(s) for tid, s in slots.items()}),
+        clashes=plan_clashes(r, cycle),
         load=[(w, planned_items(tactics, w), w in heavy) for w in range(1, EXECUTION_WEEKS + 1)],
         read_only=cycle.status == "closed",
         tab="plan",
@@ -463,6 +468,32 @@ def tactic_move(cycle_id: int, tactic_id: int):
     tactic, _goal = load_tactic(cycle, tactic_id)
     repo().move_tactic(tactic.id, move_delta())
     return to_plan(cycle, f"tactic-{tactic.id}")
+
+
+@bp.post("/c/<int:cycle_id>/schedule/check")
+def schedule_check_json(cycle_id: int):
+    """Live clash hints for the slot editor. Posted like the form itself, so the CSRF check applies."""
+    cycle = writable_cycle(cycle_id)
+    f = request.form
+    owner = f.get("owner", "")
+    owner_id = f.get("owner_id", type=int)
+    if owner == "tactic":
+        try:
+            weeks = (int(f.get("start", "")), int(f.get("end", "")))
+        except ValueError:
+            weeks = (0, 0)
+        if not 1 <= weeks[0] <= weeks[1] <= EXECUTION_WEEKS:
+            # Mid-typing week range: fall back to the saved one.
+            saved = load_tactic(cycle, owner_id)[0] if owner_id else Tactic(id=None, goal_id=0, title="")
+            weeks = (saved.start_week, saved.end_week)
+    elif owner == "block":
+        weeks = (1, REVIEW_WEEK)
+    else:
+        abort(400)
+    rows = schedule_check(
+        repo(), cycle, owner, owner_id, weeks, f.getlist("slot_day"), f.getlist("slot_time"), f.getlist("slot_minutes")
+    )
+    return jsonify({"rows": rows})
 
 
 # -- blocks -----------------------------------------------------------------------
@@ -747,20 +778,25 @@ def vision():
 def settings():
     r = repo()
     week_start, max_items, alert, error = r.week_start, str(r.max_weekly_items), str(r.alert_minutes), None
+    day_start, day_end = (hhmm(m) for m in r.day_window)
     if request.method == "POST":
         week_start = request.form.get("week_start", type=int)
         if week_start is None or not 0 <= week_start <= 6:
             abort(400)
         max_items = request.form.get("max_weekly_items", "")
         alert = request.form.get("alert_minutes", "")
+        day_start, day_end = request.form.get("day_start", ""), request.form.get("day_end", "")
         try:
             limit, alert_minutes = parse_max_weekly_items(max_items), parse_alert_minutes(alert)
+            window = parse_day_window(day_start, day_end)
         except FormError as e:
             error = str(e)
         else:
             r.set_setting("week_start", str(week_start))
             r.set_setting("max_weekly_items", str(limit))
             r.set_setting("alert_minutes", str(alert_minutes))
+            r.set_setting("day_start", str(window[0]))
+            r.set_setting("day_end", str(window[1]))
             flash(f"Settings saved. Weeks start on {WEEKDAY_NAMES[week_start]}.")
             return redirect(url_for(".settings"))
     feed_url = url_for(".calendar_feed", token=r.calendar_token, _external=True)
@@ -770,6 +806,8 @@ def settings():
         week_start=week_start,
         max_weekly_items=max_items,
         alert_minutes=alert,
+        day_start=day_start,
+        day_end=day_end,
         feed_url=feed_url,
         webcal_url="webcal://" + feed_url.split("://", 1)[1],
         error=error,

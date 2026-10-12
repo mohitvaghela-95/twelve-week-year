@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 from datetime import date, datetime
 
+from twy.domain.conflicts import DEFAULT_DAY_WINDOW
 from twy.domain.guardrails import DEFAULT_MAX_WEEKLY_ITEMS
 from twy.domain.scoring import execution_score
 from twy.models import Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
@@ -93,6 +94,12 @@ class Repo:
     @property
     def alert_minutes(self) -> int:
         return int(self.get_setting("alert_minutes", str(DEFAULT_ALERT_MINUTES)))
+
+    @property
+    def day_window(self) -> tuple[int, int]:
+        """When clash suggestions may start and must end, in minutes after midnight."""
+        start, end = DEFAULT_DAY_WINDOW
+        return int(self.get_setting("day_start", str(start))), int(self.get_setting("day_end", str(end)))
 
     @property
     def calendar_token(self) -> str:
