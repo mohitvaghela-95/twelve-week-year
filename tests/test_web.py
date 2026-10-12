@@ -9,6 +9,7 @@ from twy.db import connect
 from twy.repo import Repo
 from twy.web import create_app
 
+DAY = {"day_start": "06:00", "day_end": "22:00"}  # the settings form's suggestion hours
 TODAY = date(2026, 10, 14)  # a Wednesday: week 2 of a cycle starting Mon 5 Oct
 
 
@@ -192,11 +193,11 @@ def test_heavy_week_limit_setting(client, db_path):
     page = client.get(f"/c/{cycle.id}/plan").text
     assert "Heavy weeks" not in page and "load-cell heavy" not in page
 
-    response = post(client, "/settings", {"week_start": "0", "max_weekly_items": "abc", "alert_minutes": "10"})
+    response = post(client, "/settings", {"week_start": "0", "max_weekly_items": "abc", "alert_minutes": "10", **DAY})
     assert response.status_code == 200 and "whole number" in response.text
     assert repo.max_weekly_items == 25  # nothing saved
 
-    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4", "alert_minutes": "10"}).status_code == 302
+    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4", "alert_minutes": "10", **DAY}).status_code == 302
     assert repo.max_weekly_items == 4
     page = client.get(f"/c/{cycle.id}/plan").text
     assert "Heavy weeks (&gt; 4 items)" in page and "load-cell heavy" in page
@@ -237,6 +238,7 @@ def test_schedule_week_page_and_calendar_feed(client, db_path):
     assert client.get(f"{base}/week").location == f"{base}/week/1"
     page = client.get(f"{base}/week/1").text
     assert "Weekly review" in page and "2 overlapping" in page and "4 sessions" in page
+    assert "overlaps Admin" in page and "overlaps Study" in page
     assert client.get(f"{base}/week/14").status_code == 404
 
     # The feed: secret link, no login, this week only (today is before the Sunday review).
@@ -251,3 +253,63 @@ def test_schedule_week_page_and_calendar_feed(client, db_path):
 
     post(client, "/settings/calendar/reset")
     assert calendar_app.get(f"/calendar/{token}.ics").status_code == 404
+
+
+def test_clash_hints_and_plan_warnings(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-12"})
+    repo = repo_for(db_path)
+    cycle = repo.current_cycle()
+    base = f"/c/{cycle.id}"
+    post(client, f"{base}/goals/new", {"title": "Fitness"})
+    goal = repo.list_goals(cycle.id)[0]
+    gym = {"title": "Gym", "times": "1", "start": "7", "end": "12", "slot_day": ["0"], "slot_time": ["07:00"], "slot_minutes": ["60"]}
+    post(client, f"{base}/goals/{goal.id}/tactics/new", gym)
+    assert f'data-check-url="{base}/schedule/check"' in client.get(f"{base}/goals/{goal.id}/tactics/new").text
+
+    def check(start, end, times, owner="tactic", owner_id=""):
+        form = {"owner": owner, "owner_id": owner_id, "start": start, "end": end,
+                "slot_day": ["0"] * len(times), "slot_time": times, "slot_minutes": ["60"] * len(times)}
+        response = post(client, f"{base}/schedule/check", form)
+        assert response.status_code == 200
+        return response.get_json()["rows"]
+
+    # A new tactic at 07:30 clashes with Gym in weeks 7–12; the blank row and a clear row get nothing.
+    rows = check("1", "12", ["07:30", "", "18:00"])
+    assert rows[1] is None and rows[2] is None
+    assert rows[0]["clashes"] == ["Overlaps Gym · Mon 07:00–08:00 · weeks 7–12"]
+    assert (rows[0]["earlier"], rows[0]["later"]) == ("06:00", "08:00")
+    assert check("1", "6", ["07:30"]) == [None]  # no shared weeks
+    assert check("1", "", ["07:30"])[0]["clashes"]  # mid-typing week range: falls back to 1–12
+    assert check("", "", ["07:15", "07:45"], owner="block")[1]["clashes"] == [
+        "Overlaps slot 1 · Mon 07:15–08:15",
+        "Overlaps Gym · Mon 07:00–08:00 · weeks 7–12",
+    ]
+    gym_id = repo.list_tactics(cycle.id)[0].id
+    assert check("7", "12", ["07:00"], owner_id=str(gym_id)) == [None]  # Gym doesn't clash with itself
+    assert client.post(f"{base}/schedule/check", data={"owner": "tactic"}).status_code == 400  # no CSRF token
+
+    # Saved anyway: the Plan page lists the pair once, linking to the first item.
+    study = {"title": "Study", "times": "2", "start": "1", "end": "12",
+             "slot_day": ["0", "1"], "slot_time": ["07:30", "07:30"], "slot_minutes": ["60", "60"]}
+    post(client, f"{base}/goals/{goal.id}/tactics/new", {**study, "slot_day": ["0", "0"]})
+    page = client.get(f"{base}/plan").text
+    assert "“Gym” overlaps “Study” on Mon (weeks 7–12)." in page
+    assert "“Study” overlaps itself on Mon (weeks 1–12)." in page
+    assert f'href="{base}/tactics/{gym_id}/edit">“Gym” overlaps' in page
+
+    repo.set_cycle_status(cycle.id, "closed")
+    assert post(client, f"{base}/schedule/check", {"owner": "tactic"}).status_code == 403
+
+
+def test_suggestion_hours_setting(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    assert repo.day_window == (360, 1320)
+    assert 'value="06:00"' in client.get("/settings").text
+    form = {"week_start": "0", "max_weekly_items": "25", "alert_minutes": "10"}
+    response = post(client, "/settings", {**form, "day_start": "20:00", "day_end": "08:00"})
+    assert response.status_code == 200 and "30 minutes before" in response.text
+    assert post(client, "/settings", {**form, "day_start": "08:00", "day_end": "20:00"}).status_code == 302
+    assert repo.day_window == (480, 1200)

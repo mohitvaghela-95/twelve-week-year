@@ -10,8 +10,10 @@ from twy.services import (
     default_review_week,
     parse_alert_minutes,
     parse_block_form,
+    parse_day_window,
     parse_goal_form,
     parse_max_weekly_items,
+    parse_slot_row,
     parse_slots,
     parse_tactic_form,
     review_rows,
@@ -154,3 +156,17 @@ def test_parse_block_form():
         parse_block_form(block, {"title": "x", "kind": "nap"}, slots)
     with pytest.raises(FormError, match="time slot"):
         parse_block_form(block, {"title": "x", "kind": "admin"}, [])
+
+
+def test_parse_slot_row():
+    slot = parse_slot_row("2", "07:30", "45")
+    assert (slot.weekday, slot.start_min, slot.duration_min) == (2, 450, 45)
+    with pytest.raises(FormError, match="^pick a day"):
+        parse_slot_row("", "07:30", "45")
+
+
+def test_parse_day_window():
+    assert parse_day_window("06:00", "22:00") == (360, 1320)
+    for start, end in (("6am", "22:00"), ("06:00", ""), ("22:00", "06:00"), ("06:00", "06:20")):
+        with pytest.raises(FormError, match="Suggestion hours|Use times"):
+            parse_day_window(start, end)

@@ -10,8 +10,12 @@
 </div>
 {%- endmacro %}
 
-{% macro slot_editor(rows, hint) -%}
-<fieldset class="slots" data-slots>
+{% macro slot_editor(rows, hint, check_url=None, owner=None, owner_id=None) -%}
+<fieldset class="slots" data-slots{% if check_url %} data-check-url="{{ check_url }}"{% endif %}>
+  {%- if check_url %}
+  <input type="hidden" name="owner" value="{{ owner }}">
+  <input type="hidden" name="owner_id" value="{{ owner_id or '' }}">
+  {%- endif %}
   <legend>Calendar times</legend>
   <p class="muted small">{{ hint }} Clear a row's time to remove it.</p>
   <div class="slot-row slot-head muted small" aria-hidden="true"><span>Day</span><span>Start</span><span>Minutes</span><span></span></div>

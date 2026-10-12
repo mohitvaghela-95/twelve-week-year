@@ -14,6 +14,9 @@
   <p class="muted small">Weeks with more planned items get a “heavy week” warning on the Plan page. A 5×/week tactic counts as 5 items.</p>
   <label for="alert_minutes">Calendar alert</label>
   <div class="with-unit"><input id="alert_minutes" name="alert_minutes" type="number" inputmode="numeric" min="0" max="1440" required value="{{ alert_minutes }}"><span class="muted">minutes before (0 = none)</span></div>
+  <label for="day_start">Suggest times between</label>
+  <div class="with-unit"><input id="day_start" name="day_start" type="time" required value="{{ day_start }}"><span class="muted">and</span><input id="day_end" name="day_end" type="time" required value="{{ day_end }}" aria-label="Suggest times until"></div>
+  <p class="muted small">When a calendar time clashes, twy offers free times within these hours.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn primary block">Save</button>
 </form>

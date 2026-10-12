@@ -13,7 +13,7 @@
     {% for key, label in kinds.items() %}<option value="{{ key }}" {{ 'selected' if fields.kind == key }}>{{ label }}</option>{% endfor %}
   </select>
   <p class="muted small">From the day of your <strong>Weekly review</strong> block, the calendar also shows next week.</p>
-  {{ slot_editor(slot_rows, "When this block happens each week.") }}
+  {{ slot_editor(slot_rows, "When this block happens each week.", url_for('web.schedule_check_json', cycle_id=cycle.id), "block", block.id) }}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <div class="row-buttons">
     <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id, _anchor='blocks') }}">Cancel</a>

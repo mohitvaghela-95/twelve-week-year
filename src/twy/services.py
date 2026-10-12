@@ -8,6 +8,7 @@ from datetime import date
 
 from twy.domain.dates import (
     EXECUTION_WEEKS,
+    WEEKDAY_NAMES,
     CyclePosition,
     align_to_week_start,
     current_week,
@@ -15,8 +16,18 @@ from twy.domain.dates import (
     week_range,
 )
 from twy.domain.scoring import execution_score, goal_outcome
+from twy.domain.conflicts import (
+    PairWarning,
+    Placed,
+    Weeks,
+    check_rows,
+    find_clashes,
+    pair_warnings,
+    placed_for_cycle,
+    weeks_label,
+)
 from twy.domain.schedule import Session, sessions_for_week
-from twy.models import BLOCK_KINDS, Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
+from twy.models import BLOCK_KINDS, Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview, hhmm
 from twy.repo import Repo
 
 OUTCOMES = ("hit", "missed")
@@ -74,23 +85,41 @@ def parse_time(text: str) -> int | None:
     return h * 60 + m if h < 24 and m < 60 else None
 
 
+def parse_slot_row(day: str, time: str, length: str) -> Slot:
+    """One slot editor row. Error messages are lower-case so callers can prefix the row."""
+    if not (day.isdigit() and 0 <= int(day) <= 6):
+        raise FormError("pick a day.")
+    start = parse_time(time)
+    if start is None:
+        raise FormError("use a time like 07:30.")
+    if not length.strip().isdigit() or not 5 <= int(length) <= 720:
+        raise FormError("length must be 5–720 minutes.")
+    if start + int(length) > 24 * 60:
+        raise FormError("must end by midnight.")
+    return Slot(weekday=int(day), start_min=start, duration_min=int(length))
+
+
 def parse_slots(days: list[str], times: list[str], minutes: list[str]) -> list[Slot]:
     """Weekly slots from the parallel day/time/minutes form lists. Rows without a time are skipped."""
     slots: list[Slot] = []
     for row, (day, time, length) in enumerate(zip(days, times, minutes, strict=False), start=1):
         if not time.strip():
             continue
-        if not (day.isdigit() and 0 <= int(day) <= 6):
-            raise FormError(f"Slot {row}: pick a day.")
-        start = parse_time(time)
-        if start is None:
-            raise FormError(f"Slot {row}: use a time like 07:30.")
-        if not length.strip().isdigit() or not 5 <= int(length) <= 720:
-            raise FormError(f"Slot {row}: length must be 5–720 minutes.")
-        if start + int(length) > 24 * 60:
-            raise FormError(f"Slot {row}: must end by midnight.")
-        slots.append(Slot(weekday=int(day), start_min=start, duration_min=int(length)))
+        try:
+            slots.append(parse_slot_row(day, time, length))
+        except FormError as e:
+            raise FormError(f"Slot {row}: {e}") from None
     return sorted(slots, key=lambda s: (s.weekday, s.start_min))
+
+
+def parse_day_window(start_text: str, end_text: str) -> tuple[int, int]:
+    """The "suggest times between" pair from the settings form."""
+    start, end = parse_time(start_text), parse_time(end_text)
+    if start is None or end is None:
+        raise FormError("Use times like 06:00 for the suggestion hours.")
+    if end - start < 30:
+        raise FormError("Suggestion hours must start at least 30 minutes before they end.")
+    return start, end
 
 
 def parse_block_form(block: Block, fields: Mapping[str, str], slots: list[Slot]) -> Block:
@@ -245,6 +274,61 @@ def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
     return sessions_for_week(
         cycle, week_no, repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), goals, repo.list_blocks(cycle.id)
     )
+
+
+def plan_clashes(repo: Repo, cycle: Cycle) -> list[PairWarning]:
+    """Every pair of saved items whose calendar times overlap in a shared week."""
+    placed = placed_for_cycle(repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), repo.list_blocks(cycle.id))
+    return pair_warnings(find_clashes(placed))
+
+
+def schedule_check(
+    repo: Repo,
+    cycle: Cycle,
+    owner: str,
+    owner_id: int | None,
+    weeks: Weeks,
+    days: list[str],
+    times: list[str],
+    minutes: list[str],
+) -> list[dict | None]:
+    """Live clash hints for the slot editor, one entry per posted row (None: blank, invalid or clear)."""
+    others = placed_for_cycle(
+        repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), repo.list_blocks(cycle.id), skip=(owner, owner_id)
+    )
+    rows: list[Placed] = []
+    index: list[int | None] = []  # posted row → position in `rows`
+    for n, (day, time, length) in enumerate(zip(days, times, minutes, strict=False), start=1):
+        try:
+            slot = parse_slot_row(day, time, length) if time.strip() else None
+        except FormError:
+            slot = None
+        index.append(None if slot is None else len(rows))
+        if slot is not None:
+            rows.append(Placed(f"slot {n}", owner, owner_id, weeks, slot, row=n))
+
+    checks = check_rows(rows, others, repo.day_window)
+    results: list[dict | None] = []
+    for i in index:
+        if i is None or not checks[i].clashes:
+            results.append(None)
+            continue
+        row, check = rows[i], checks[i]
+        notes = []
+        for other, shared in check.clashes:
+            note = f"Overlaps {other.title} · {other.slot.label}"
+            notes.append(note if other.row is not None else f"{note} · {weeks_label(shared)}")
+        results.append(
+            {
+                "clashes": notes,
+                "earlier": None if check.earlier is None else hhmm(check.earlier),
+                "later": None if check.later is None else hhmm(check.later),
+                "no_gap": None
+                if check.earlier is not None or check.later is not None
+                else f"No free {row.slot.duration_min}-min gap on {WEEKDAY_NAMES[row.slot.weekday]}.",
+            }
+        )
+    return results
 
 
 # -- weekly review ----------------------------------------------------------------
