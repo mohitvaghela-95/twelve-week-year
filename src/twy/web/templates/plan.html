@@ -40,6 +40,7 @@
       <div>
         <span>{{ t.title }}</span>
         <span class="muted small">{{ t.times_per_week }}×/wk · weeks {{ t.start_week }}–{{ t.end_week }}</span>
+        {% if slots.get(t.id) %}<span class="slot-labels">{{ slots[t.id]|map(attribute="label")|join(" · ") }}</span>{% endif %}
       </div>
       {% if not read_only %}
       <div class="actions">
@@ -60,8 +61,43 @@
 <section class="card empty"><p>No goals yet. 1–3 goals is ideal: specific, measurable, and tied to your vision.</p></section>
 {% endfor %}
 
+{% if not read_only %}<a class="btn block" href="{{ url_for('web.goal_new', cycle_id=cycle.id) }}">+ Add goal</a>{% endif %}
+
+<section class="card" id="blocks">
+  <div class="card-head">
+    <h2>Time blocks</h2>
+    <a class="small" href="{{ url_for('web.week_default', cycle_id=cycle.id) }}">Week view ›</a>
+  </div>
+  <p class="muted small">Admin, chores, breakout and your weekly review. They go in your calendar but aren't scored.</p>
+  <ul class="tactics">
+    {% for b in blocks %}
+    <li id="block-{{ b.id }}">
+      <div>
+        <span><span class="kind-dot kind-{{ b.kind }}"></span>{{ b.title }}</span>
+        <span class="muted small">{{ BLOCK_KINDS[b.kind] }}</span>
+        <span class="slot-labels">{{ b.slots|map(attribute="label")|join(" · ") }}</span>
+      </div>
+      {% if not read_only %}
+      <div class="actions">
+        {{ post_button(url_for('web.block_move', cycle_id=cycle.id, block_id=b.id), "↑", "Move block up", delta=-1) }}
+        {{ post_button(url_for('web.block_move', cycle_id=cycle.id, block_id=b.id), "↓", "Move block down", delta=1) }}
+        <a class="icon-btn" href="{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=b.id) }}" title="Edit block" aria-label="Edit block">✎</a>
+        {{ post_button(url_for('web.block_delete', cycle_id=cycle.id, block_id=b.id), "🗑", "Delete block", confirm="Delete block “" ~ b.title ~ "”?") }}
+      </div>
+      {% endif %}
+    </li>
+    {% else %}
+    <li class="muted">No blocks yet.</li>
+    {% endfor %}
+  </ul>
+  {% if not read_only %}
+  <div class="quick-add">
+    {% for key, label in BLOCK_KINDS.items() %}<a class="btn small" href="{{ url_for('web.block_new', cycle_id=cycle.id, kind=key) }}">+ {{ label }}</a>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+
 {% if not read_only %}
-<a class="btn block" href="{{ url_for('web.goal_new', cycle_id=cycle.id) }}">+ Add goal</a>
 {% if cycle.status == "planning" %}
 <form method="post" action="{{ url_for('web.start_cycle', cycle_id=cycle.id) }}">
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">

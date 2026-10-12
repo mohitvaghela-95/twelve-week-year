@@ -9,7 +9,14 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 - **Review:** a −/+ done count per tactic, a live score, lag values, obstacles and a fix.
 - **Trend:** a 12-week chart with the 85% line, plus weekly notes.
 - **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
-- **Cycles, Vision, Settings:** past cycles are read-only. Settings has the backup download.
+- **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged.
+- **Cycles, Vision, Settings:** past cycles are read-only. Settings has the backup download and the calendar link.
+
+## Calendar
+
+Give a tactic **calendar times** (day, start time and minutes, e.g. Study: Mon–Fri 07:00 for 60 min). Add **time blocks** on the Plan page for admin, chores, breakout and your weekly review. Blocks belong to the cycle and are copied with "copy previous plan", but they aren't scored.
+
+Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. From the day of your weekly review block, it also shows next week. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
 
 ## How scoring works
 

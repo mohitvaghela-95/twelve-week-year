@@ -15,7 +15,8 @@ from twy.domain.dates import (
     week_range,
 )
 from twy.domain.scoring import execution_score, goal_outcome
-from twy.models import Cycle, CycleReview, Goal, Tactic, WeekEntry, WeekReview
+from twy.domain.schedule import Session, sessions_for_week
+from twy.models import BLOCK_KINDS, Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
 from twy.repo import Repo
 
 OUTCOMES = ("hit", "missed")
@@ -51,6 +52,57 @@ def parse_max_weekly_items(text: str) -> int:
     if not low <= value <= high:
         raise FormError(f"Max items per week must be between {low} and {high}.")
     return value
+
+
+def parse_alert_minutes(text: str) -> int:
+    """Calendar alert lead time from the settings form; 0 turns alerts off."""
+    try:
+        value = int(text.strip())
+    except ValueError:
+        raise FormError("Alert must be a whole number of minutes (0 for none).") from None
+    if not 0 <= value <= 1440:
+        raise FormError("Alert must be between 0 and 1440 minutes.")
+    return value
+
+
+def parse_time(text: str) -> int | None:
+    """"HH:MM" (or "HH:MM:SS" from some browsers) → minutes after midnight, else None."""
+    parts = text.strip().split(":")
+    if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts) or len(parts[1]) != 2:
+        return None
+    h, m = int(parts[0]), int(parts[1])
+    return h * 60 + m if h < 24 and m < 60 else None
+
+
+def parse_slots(days: list[str], times: list[str], minutes: list[str]) -> list[Slot]:
+    """Weekly slots from the parallel day/time/minutes form lists. Rows without a time are skipped."""
+    slots: list[Slot] = []
+    for row, (day, time, length) in enumerate(zip(days, times, minutes, strict=False), start=1):
+        if not time.strip():
+            continue
+        if not (day.isdigit() and 0 <= int(day) <= 6):
+            raise FormError(f"Slot {row}: pick a day.")
+        start = parse_time(time)
+        if start is None:
+            raise FormError(f"Slot {row}: use a time like 07:30.")
+        if not length.strip().isdigit() or not 5 <= int(length) <= 720:
+            raise FormError(f"Slot {row}: length must be 5–720 minutes.")
+        if start + int(length) > 24 * 60:
+            raise FormError(f"Slot {row}: must end by midnight.")
+        slots.append(Slot(weekday=int(day), start_min=start, duration_min=int(length)))
+    return sorted(slots, key=lambda s: (s.weekday, s.start_min))
+
+
+def parse_block_form(block: Block, fields: Mapping[str, str], slots: list[Slot]) -> Block:
+    title = fields.get("title", "").strip()
+    kind = fields.get("kind", "other")
+    if not title:
+        raise FormError("Block title is required.")
+    if kind not in BLOCK_KINDS:
+        raise FormError("Pick a kind of block.")
+    if not slots:
+        raise FormError("Add at least one time slot.")
+    return replace(block, title=title, kind=kind, slots=slots)
 
 
 def fmt_num(value: float | None) -> str:
@@ -182,6 +234,17 @@ def parse_tactic_form(tactic: Tactic, fields: Mapping[str, str]) -> Tactic:
     if not (1 <= start <= end <= EXECUTION_WEEKS):
         raise FormError(f"Weeks must satisfy 1 ≤ from ≤ to ≤ {EXECUTION_WEEKS}.")
     return replace(tactic, title=title, times_per_week=times, start_week=start, end_week=end)
+
+
+# -- schedule ---------------------------------------------------------------------
+
+
+def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
+    """Every tactic and block session in one cycle week, in time order."""
+    goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
+    return sessions_for_week(
+        cycle, week_no, repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), goals, repo.list_blocks(cycle.id)
+    )
 
 
 # -- weekly review ----------------------------------------------------------------

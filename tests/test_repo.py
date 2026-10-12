@@ -1,6 +1,8 @@
+import sqlite3
 from datetime import date
 
-from twy.models import CycleReview, Goal, Tactic, WeekEntry, WeekReview
+from twy.db import MIGRATIONS, connect
+from twy.models import Block, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
 
 MON = date(2026, 10, 5)
 
@@ -79,3 +81,45 @@ def test_close_cycle_and_copy_plan(repo):
     assert [t.title for t in repo.list_tactics(nxt.id)] == ["Run", "Log food"]
     assert repo.get_cycle_review(cycle.id).lessons == "Plan less"
     assert [c.name for c in repo.list_cycles()] == ["Q1", "Q4"]
+
+
+def test_migration_upgrades_a_v1_database(tmp_path):
+    path = tmp_path / "v1.db"
+    old = sqlite3.connect(path)
+    old.executescript(MIGRATIONS[0])
+    old.execute("PRAGMA user_version = 1")
+    old.commit()
+    old.close()
+    conn = connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
+    assert conn.execute("SELECT COUNT(*) FROM slot").fetchone()[0] == 0
+
+
+def test_slots_blocks_and_copy_plan(repo):
+    cycle = repo.create_cycle("Q4", MON, 0)
+    goal = repo.save_goal(Goal(id=None, cycle_id=cycle.id, title="AI engineer offer"))
+    study = repo.save_tactic(Tactic(id=None, goal_id=goal.id, title="Study", times_per_week=5))
+    repo.replace_tactic_slots(study.id, [Slot(1, 420, 60), Slot(0, 420, 60)])
+    assert [s.label for s in repo.tactic_slots(cycle.id)[study.id]] == ["Mon 07:00–08:00", "Tue 07:00–08:00"]
+
+    block = repo.save_block(Block(id=None, cycle_id=cycle.id, title="Admin", kind="admin", slots=[Slot(4, 960, 30)]))
+    block.slots = [Slot(5, 600, 60)]
+    repo.save_block(block)
+    assert [s.label for s in repo.get_block(block.id).slots] == ["Sat 10:00–11:00"]
+
+    nxt = repo.create_cycle("Q1", date(2027, 1, 4), 0)
+    repo.copy_plan(cycle.id, nxt.id)
+    copied = repo.list_tactics(nxt.id)[0]
+    assert len(repo.list_slots("tactic_id", copied.id)) == 2
+    assert [(b.title, b.kind, len(b.slots)) for b in repo.list_blocks(nxt.id)] == [("Admin", "admin", 1)]
+
+    repo.delete_tactic(study.id)
+    assert repo.tactic_slots(cycle.id) == {}
+    repo.delete_block(block.id)
+    assert repo.conn.execute("SELECT COUNT(*) FROM slot WHERE block_id IS NOT NULL").fetchone()[0] == 1  # the copy's
+
+
+def test_calendar_token_is_stable_until_rotated(repo):
+    token = repo.calendar_token
+    assert len(token) >= 32 and repo.calendar_token == token
+    assert repo.rotate_calendar_token() != token
