@@ -7,7 +7,19 @@ from datetime import date, datetime
 from twy.domain.conflicts import DEFAULT_DAY_WINDOW
 from twy.domain.guardrails import DEFAULT_MAX_WEEKLY_ITEMS
 from twy.domain.scoring import execution_score
-from twy.models import Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
+from twy.models import (
+    Answer,
+    Block,
+    Cycle,
+    CycleReview,
+    DayReview,
+    Goal,
+    Prompt,
+    Slot,
+    Tactic,
+    WeekEntry,
+    WeekReview,
+)
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -54,6 +66,17 @@ def _tactic(row: sqlite3.Row) -> Tactic:
 
 def _slot(row: sqlite3.Row) -> Slot:
     return Slot(weekday=row["weekday"], start_min=row["start_min"], duration_min=row["duration_min"], id=row["id"])
+
+
+def _prompt(row: sqlite3.Row) -> Prompt:
+    return Prompt(
+        id=row["id"],
+        scope=row["scope"],
+        label=row["label"],
+        kind=row["kind"],
+        active=bool(row["active"]),
+        position=row["position"],
+    )
 
 
 def _owner(column: str) -> str:
@@ -395,10 +418,9 @@ class Repo:
         return WeekReview(
             cycle_id=cycle_id,
             week_no=week_no,
-            obstacles=row["obstacles"],
-            fix=row["fix"],
             reviewed_at=_dt(row["reviewed_at"]),
             entries=entries,
+            answers=self.get_answers(cycle_id, "weekly", str(week_no)),
         )
 
     def reviewed_weeks(self, cycle_id: int) -> set[int]:
@@ -410,7 +432,7 @@ class Repo:
         review: WeekReview,
         progress: dict[int, float | None] | None = None,
     ) -> None:
-        """Write the scorecard, reflections and lag readings in one transaction.
+        """Write the scorecard, reflection answers and lag readings in one transaction.
 
         Entries are a snapshot of what was planned, replacing any earlier snapshot for this week.
         """
@@ -426,11 +448,11 @@ class Repo:
                 ],
             )
             self.conn.execute(
-                "INSERT INTO week_review (cycle_id, week_no, obstacles, fix) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(cycle_id, week_no) DO UPDATE SET obstacles = excluded.obstacles, "
-                "fix = excluded.fix, reviewed_at = CURRENT_TIMESTAMP",
-                (review.cycle_id, review.week_no, review.obstacles, review.fix),
+                "INSERT INTO week_review (cycle_id, week_no) VALUES (?, ?) "
+                "ON CONFLICT(cycle_id, week_no) DO UPDATE SET reviewed_at = CURRENT_TIMESTAMP",
+                (review.cycle_id, review.week_no),
             )
+            self._replace_answers(review.cycle_id, "weekly", str(review.week_no), review.answers)
             for goal_id, value in (progress or {}).items():
                 if value is None:
                     self.conn.execute(
@@ -460,6 +482,135 @@ class Repo:
     def latest_progress(self, goal_id: int) -> float | None:
         progress = self.goal_progress(goal_id)
         return progress[max(progress)] if progress else None
+
+    # -- daily tactic logs ------------------------------------------------------
+
+    def log_tactic(self, tactic_id: int, day: date, delta: int) -> int:
+        """Add `delta` to a tactic's count for a day (never below 0). Returns the new count."""
+        with self.conn:
+            count = max(0, self.logged_on(tactic_id, day) + delta)
+            if count:
+                self.conn.execute(
+                    "INSERT INTO tactic_log (tactic_id, day, count) VALUES (?, ?, ?) "
+                    "ON CONFLICT(tactic_id, day) DO UPDATE SET count = excluded.count",
+                    (tactic_id, day.isoformat(), count),
+                )
+            else:
+                self.conn.execute("DELETE FROM tactic_log WHERE tactic_id = ? AND day = ?", (tactic_id, day.isoformat()))
+        return count
+
+    def logged_on(self, tactic_id: int, day: date) -> int:
+        row = self.conn.execute(
+            "SELECT count FROM tactic_log WHERE tactic_id = ? AND day = ?", (tactic_id, day.isoformat())
+        ).fetchone()
+        return row["count"] if row else 0
+
+    def logged_between(self, cycle_id: int, first: date, last: date) -> dict[int, int]:
+        """Total logged per tactic over `first`..`last` inclusive (tactics with nothing logged are absent)."""
+        rows = self.conn.execute(
+            "SELECT l.tactic_id, SUM(l.count) AS total FROM tactic_log l "
+            "JOIN tactic t ON t.id = l.tactic_id JOIN goal g ON g.id = t.goal_id "
+            "WHERE g.cycle_id = ? AND l.day BETWEEN ? AND ? GROUP BY l.tactic_id",
+            (cycle_id, first.isoformat(), last.isoformat()),
+        )
+        return {r["tactic_id"]: r["total"] for r in rows}
+
+    # -- reflection prompts -----------------------------------------------------
+
+    def list_prompts(self, scope: str, active_only: bool = False) -> list[Prompt]:
+        sql = "SELECT * FROM prompt WHERE scope = ?" + (" AND active = 1" if active_only else "")
+        return [_prompt(r) for r in self.conn.execute(sql + " ORDER BY position, id", (scope,))]
+
+    def get_prompt(self, prompt_id: int) -> Prompt:
+        row = self.conn.execute("SELECT * FROM prompt WHERE id = ?", (prompt_id,)).fetchone()
+        if row is None:
+            raise KeyError(prompt_id)
+        return _prompt(row)
+
+    def save_prompt(self, prompt: Prompt) -> Prompt:
+        with self.conn:
+            if prompt.id is None:
+                pos = self.conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM prompt WHERE scope = ?", (prompt.scope,)
+                ).fetchone()[0]
+                cur = self.conn.execute(
+                    "INSERT INTO prompt (scope, position, label, kind, active) VALUES (?, ?, ?, ?, ?)",
+                    (prompt.scope, pos, prompt.label, prompt.kind, int(prompt.active)),
+                )
+                prompt.id, prompt.position = cur.lastrowid, pos
+            else:
+                self.conn.execute(
+                    "UPDATE prompt SET label = ?, kind = ?, active = ? WHERE id = ?",
+                    (prompt.label, prompt.kind, int(prompt.active), prompt.id),
+                )
+        return prompt
+
+    def delete_prompt(self, prompt_id: int) -> None:
+        """Past answers keep their copied label; only the link to the prompt is cleared."""
+        with self.conn:
+            self.conn.execute("DELETE FROM prompt WHERE id = ?", (prompt_id,))
+
+    def move_prompt(self, prompt_id: int, delta: int) -> None:
+        prompt = self.get_prompt(prompt_id)
+        self._swap(self.list_prompts(prompt.scope), prompt_id, delta, "prompt")
+
+    # -- reflection answers -----------------------------------------------------
+
+    def get_answers(self, cycle_id: int, scope: str, period: str) -> list[Answer]:
+        rows = self.conn.execute(
+            "SELECT * FROM answer WHERE cycle_id = ? AND scope = ? AND period = ? ORDER BY position, id",
+            (cycle_id, scope, period),
+        )
+        return [Answer(r["prompt_id"], r["label"], r["kind"], r["value"], r["position"]) for r in rows]
+
+    def weekly_answers(self, cycle_id: int) -> dict[int, list[Answer]]:
+        """Every weekly review's answers in a cycle, keyed by week number."""
+        rows = self.conn.execute(
+            "SELECT * FROM answer WHERE cycle_id = ? AND scope = 'weekly' ORDER BY position, id", (cycle_id,)
+        )
+        answers: dict[int, list[Answer]] = {}
+        for r in rows:
+            answers.setdefault(int(r["period"]), []).append(
+                Answer(r["prompt_id"], r["label"], r["kind"], r["value"], r["position"])
+            )
+        return answers
+
+    def _replace_answers(self, cycle_id: int, scope: str, period: str, answers: list[Answer]) -> None:
+        """Replace a period's answers, inside the caller's transaction."""
+        self.conn.execute(
+            "DELETE FROM answer WHERE cycle_id = ? AND scope = ? AND period = ?", (cycle_id, scope, period)
+        )
+        self.conn.executemany(
+            "INSERT INTO answer (cycle_id, scope, period, prompt_id, position, label, kind, value) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [(cycle_id, scope, period, a.prompt_id, i, a.label, a.kind, a.value) for i, a in enumerate(answers)],
+        )
+
+    # -- daily reviews ----------------------------------------------------------
+
+    def get_day_review(self, cycle_id: int, day: date) -> DayReview | None:
+        row = self.conn.execute(
+            "SELECT * FROM day_review WHERE cycle_id = ? AND day = ?", (cycle_id, day.isoformat())
+        ).fetchone()
+        if row is None:
+            return None
+        return DayReview(cycle_id, day, _dt(row["reviewed_at"]), self.get_answers(cycle_id, "daily", day.isoformat()))
+
+    def save_day_review(self, review: DayReview) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO day_review (cycle_id, day) VALUES (?, ?) "
+                "ON CONFLICT(cycle_id, day) DO UPDATE SET reviewed_at = CURRENT_TIMESTAMP",
+                (review.cycle_id, review.day.isoformat()),
+            )
+            self._replace_answers(review.cycle_id, "daily", review.day.isoformat(), review.answers)
+
+    def reviewed_days(self, cycle_id: int, first: date, last: date) -> set[date]:
+        rows = self.conn.execute(
+            "SELECT day FROM day_review WHERE cycle_id = ? AND day BETWEEN ? AND ?",
+            (cycle_id, first.isoformat(), last.isoformat()),
+        )
+        return {date.fromisoformat(r["day"]) for r in rows}
 
     # -- cycle review (week 13) -------------------------------------------------
 

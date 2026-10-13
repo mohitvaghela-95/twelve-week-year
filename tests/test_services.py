@@ -2,26 +2,32 @@ from datetime import date, timedelta
 
 import pytest
 
-from twy.models import Block, Goal, Tactic
+from twy.models import Answer, Block, Goal, Prompt, Tactic
 from twy.services import (
     FormError,
     create_cycle,
     cycle_status,
     default_review_week,
+    loggable,
+    parse_answers,
     parse_alert_minutes,
     parse_block_form,
     parse_day_window,
     parse_goal_form,
     parse_max_weekly_items,
+    parse_prompt_form,
     parse_slot_row,
     parse_slots,
     parse_tactic_form,
+    reflection_items,
     review_rows,
     reviewable_weeks,
     save_week,
     save_week13,
     snap_start,
+    today_rows,
     week_entries,
+    week_progress,
 )
 
 MON = date(2026, 10, 5)
@@ -49,7 +55,7 @@ def test_review_rows_respect_week_range_and_snapshot(repo):
     assert [r.title for r in review_rows(repo, cycle, 10)] == ["Run", "Launch"]
 
     rows = review_rows(repo, cycle, 1)
-    save_week(repo, cycle, 1, week_entries(cycle.id, 1, rows, {run.id: 5}), "", "", {})
+    save_week(repo, cycle, 1, week_entries(cycle.id, 1, rows, {run.id: 5}), [], {})
     assert repo.get_cycle(cycle.id).status == "active"  # first review starts the cycle
 
     # A tactic added after week 1 was reviewed doesn't appear in week 1's snapshot.
@@ -170,3 +176,54 @@ def test_parse_day_window():
     for start, end in (("6am", "22:00"), ("06:00", ""), ("22:00", "06:00"), ("06:00", "06:20")):
         with pytest.raises(FormError, match="Suggestion hours|Use times"):
             parse_day_window(start, end)
+
+
+def test_reflection_items_keep_saved_wording_and_add_new_prompts():
+    prompts = [Prompt(1, "daily", "Went well?"), Prompt(2, "daily", "Energy", "rating")]
+    assert [(i.key, i.label) for i in reflection_items(prompts, [])] == [("p-1", "Went well?"), ("p-2", "Energy")]
+
+    saved = [Answer(2, "Energy (old)", "rating", "3"), Answer(None, "Deleted prompt", "text", "Hi")]
+    items = reflection_items(prompts, saved)
+    assert [(i.key, i.label, i.value) for i in items] == [
+        ("p-1", "Went well?", ""),
+        ("p-2", "Energy (old)", "3"),
+        ("a-1", "Deleted prompt", "Hi"),
+    ]
+    hidden = reflection_items(prompts[:1], saved)  # Energy hidden since: its answer moves to the end
+    assert [i.key for i in hidden] == ["p-1", "p-2", "a-1"]
+
+
+def test_parse_answers_validates_kinds_and_skips_blanks():
+    prompts = [Prompt(1, "daily", "Notes"), Prompt(2, "daily", "Energy", "rating"), Prompt(3, "daily", "Planned?", "yesno")]
+    items = reflection_items(prompts, [])
+    answers = parse_answers(items, {"p-1": "  ", "p-2": "4", "p-3": "yes"})
+    assert [(a.prompt_id, a.value) for a in answers] == [(2, "4"), (3, "yes")]
+    with pytest.raises(FormError, match="Energy"):
+        parse_answers(items, {"p-2": "9"})
+    assert items[1].value == "9"  # kept for re-showing the form
+    with pytest.raises(FormError, match="yes or no"):
+        parse_answers(items, {"p-3": "maybe"})
+
+
+def test_parse_prompt_form():
+    prompt = parse_prompt_form(Prompt(None, "weekly", ""), {"label": " Energy ", "kind": "rating"})
+    assert (prompt.label, prompt.kind) == ("Energy", "rating")
+    with pytest.raises(FormError):
+        parse_prompt_form(prompt, {"label": ""})
+    with pytest.raises(FormError):
+        parse_prompt_form(prompt, {"label": "x", "kind": "essay"})
+
+
+def test_today_rows_and_progress(repo):
+    cycle, goal, books, run, late = make_plan(repo)
+    tue, wed = MON + timedelta(days=1), MON + timedelta(days=2)
+    assert loggable(cycle, tue, wed) and not loggable(cycle, wed + timedelta(days=1), wed)
+    assert not loggable(cycle, MON - timedelta(days=1), wed)
+    assert not loggable(cycle, MON + timedelta(weeks=12), MON + timedelta(weeks=13))  # week 13 isn't tracked
+
+    for _ in range(4):
+        repo.log_tactic(run.id, tue, 1)
+    repo.log_tactic(run.id, wed, 1)
+    rows = today_rows(repo, cycle, wed)
+    assert [(r.title, r.today, r.week, r.planned) for r in rows] == [("Run", 1, 5, 3)]  # Launch starts in week 10
+    assert week_progress(rows) == 1.0  # capped at the plan

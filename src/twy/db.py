@@ -100,6 +100,58 @@ MIGRATIONS: list[str] = [
     CREATE INDEX slot_tactic ON slot (tactic_id);
     CREATE INDEX slot_block ON slot (block_id);
     """,
+    # v3: daily tactic logs, daily reviews and configurable reflection prompts.
+    # week_review.obstacles/fix are copied into answers and no longer used.
+    """
+    CREATE TABLE tactic_log (
+        tactic_id INTEGER NOT NULL REFERENCES tactic(id) ON DELETE CASCADE,
+        day       TEXT NOT NULL,
+        count     INTEGER NOT NULL CHECK (count >= 0),
+        PRIMARY KEY (tactic_id, day)
+    );
+    CREATE TABLE prompt (
+        id       INTEGER PRIMARY KEY,
+        scope    TEXT NOT NULL CHECK (scope IN ('daily', 'weekly')),
+        position INTEGER NOT NULL DEFAULT 0,
+        label    TEXT NOT NULL,
+        kind     TEXT NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'rating', 'yesno')),
+        active   INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE day_review (
+        cycle_id    INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        day         TEXT NOT NULL,
+        reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (cycle_id, day)
+    );
+    -- label and kind are a snapshot, so editing or deleting a prompt never rewrites past reviews.
+    CREATE TABLE answer (
+        id        INTEGER PRIMARY KEY,
+        cycle_id  INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        scope     TEXT NOT NULL CHECK (scope IN ('daily', 'weekly')),
+        period    TEXT NOT NULL,  -- ISO date (daily) or week number (weekly)
+        prompt_id INTEGER REFERENCES prompt(id) ON DELETE SET NULL,
+        position  INTEGER NOT NULL DEFAULT 0,
+        label     TEXT NOT NULL,
+        kind      TEXT NOT NULL,
+        value     TEXT NOT NULL
+    );
+    CREATE INDEX answer_period ON answer (cycle_id, scope, period);
+
+    INSERT INTO prompt (scope, position, label, kind) VALUES
+        ('daily', 0, 'What went well?', 'text'),
+        ('daily', 1, 'What got in the way?', 'text'),
+        ('daily', 2, 'Top tactics for tomorrow', 'text'),
+        ('weekly', 0, 'What got in the way?', 'text'),
+        ('weekly', 1, 'One fix for next week', 'text');
+    INSERT INTO answer (cycle_id, scope, period, prompt_id, position, label, kind, value)
+        SELECT cycle_id, 'weekly', CAST(week_no AS TEXT),
+               (SELECT id FROM prompt WHERE scope = 'weekly' AND position = 0), 0, 'What got in the way?', 'text', obstacles
+        FROM week_review WHERE obstacles != '';
+    INSERT INTO answer (cycle_id, scope, period, prompt_id, position, label, kind, value)
+        SELECT cycle_id, 'weekly', CAST(week_no AS TEXT),
+               (SELECT id FROM prompt WHERE scope = 'weekly' AND position = 1), 1, 'One fix for next week', 'text', fix
+        FROM week_review WHERE fix != '';
+    """,
 ]
 
 

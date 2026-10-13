@@ -1,4 +1,4 @@
-"""Create a demo database with a cycle that is 7 weeks in and 6 weeks reviewed.
+"""Create a demo database with a cycle that is 7 weeks in, 6 weeks reviewed and this week partly logged.
 
     TWY_DB=/tmp/twy-demo.db uv run python scripts/seed_demo.py
     TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
@@ -9,7 +9,7 @@ from datetime import date, timedelta
 
 from twy.db import connect, default_db_path
 from twy.domain.dates import align_to_week_start
-from twy.models import Goal, Tactic, WeekEntry, WeekReview
+from twy.models import Answer, DayReview, Goal, Tactic, WeekEntry, WeekReview
 from twy.repo import Repo
 
 
@@ -34,6 +34,7 @@ def seed(repo: Repo, today: date) -> None:
     ]
 
     notes = ["Travel for work", "", "Sick two days", "Late meetings", "", "Kids' school holiday"]
+    obstacles, fix = repo.list_prompts("weekly")
     value = 82.0
     for week in range(1, 7):
         entries = []
@@ -42,9 +43,23 @@ def seed(repo: Repo, today: date) -> None:
                 done = max(0, t.times_per_week - rng.choice([0, 0, 0, 1]))
                 entries.append(WeekEntry(cycle.id, week, t.id, t.times_per_week, done))
         value -= rng.uniform(0.2, 0.9)
-        repo.save_week_review(
-            WeekReview(cycle.id, week, notes[week - 1], "Book runs in calendar" if notes[week - 1] else "", entries=entries),
-            {weight.id: round(value, 1)},
+        answers = [
+            Answer(obstacles.id, obstacles.label, obstacles.kind, notes[week - 1]),
+            Answer(fix.id, fix.label, fix.kind, "Book runs in calendar"),
+        ] if notes[week - 1] else []
+        repo.save_week_review(WeekReview(cycle.id, week, entries=entries, answers=answers), {weight.id: round(value, 1)})
+
+    # This week (7): a few tactics logged on Today, and yesterday's reflection.
+    week_first = start + timedelta(weeks=6)
+    for offset in range((today - week_first).days + 1):
+        day = week_first + timedelta(days=offset)
+        for t in tactics:
+            if t.active_in(7) and rng.random() < 0.35:
+                repo.log_tactic(t.id, day, 1)
+    if today > week_first:
+        went_well = repo.list_prompts("daily")[0]
+        repo.save_day_review(
+            DayReview(cycle.id, today - timedelta(days=1), answers=[Answer(went_well.id, went_well.label, "text", "Ran before work")])
         )
 
 

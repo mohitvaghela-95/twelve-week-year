@@ -2,7 +2,7 @@ import sqlite3
 from datetime import date
 
 from twy.db import MIGRATIONS, connect
-from twy.models import Block, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview
+from twy.models import Answer, Block, CycleReview, DayReview, Goal, Prompt, Slot, Tactic, WeekEntry, WeekReview
 
 MON = date(2026, 10, 5)
 
@@ -47,13 +47,13 @@ def test_week_review_snapshot_and_scores(repo):
     review = WeekReview(
         cycle_id=cycle.id,
         week_no=1,
-        obstacles="Travel",
-        fix="Run in hotel gym",
+        answers=[Answer(None, "What got in the way?", "text", "Travel")],
         entries=[WeekEntry(cycle.id, 1, run.id, 3, 2), WeekEntry(cycle.id, 1, log.id, 1, 1)],
     )
     repo.save_week_review(review, progress={goal.id: 79.0})
     assert repo.weekly_scores(cycle.id) == {1: 0.75}
     assert repo.latest_progress(goal.id) == 79.0
+    assert [a.value for a in repo.get_week_review(cycle.id, 1).answers] == ["Travel"]
 
     # Editing the tactic later does not rewrite the snapshot.
     run.times_per_week = 5
@@ -123,3 +123,56 @@ def test_calendar_token_is_stable_until_rotated(repo):
     token = repo.calendar_token
     assert len(token) >= 32 and repo.calendar_token == token
     assert repo.rotate_calendar_token() != token
+
+
+def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
+    path = tmp_path / "v2.db"
+    old = sqlite3.connect(path)
+    for script in MIGRATIONS[:2]:
+        old.executescript(script)
+    old.execute("PRAGMA user_version = 2")
+    old.execute("INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0)")
+    old.execute("INSERT INTO week_review (cycle_id, week_no, obstacles, fix) VALUES (1, 1, 'Rain', 'Gym'), (1, 2, '', 'Sleep')")
+    old.commit()
+    old.close()
+
+    from twy.repo import Repo
+
+    repo = Repo(connect(path))
+    weekly = repo.list_prompts("weekly")
+    assert [p.label for p in weekly] == ["What got in the way?", "One fix for next week"]
+    assert len(repo.list_prompts("daily")) == 3
+    assert [(a.prompt_id, a.value) for a in repo.get_week_review(1, 1).answers] == [(weekly[0].id, "Rain"), (weekly[1].id, "Gym")]
+    assert [a.label for a in repo.get_week_review(1, 2).answers] == ["One fix for next week"]
+
+
+def test_tactic_logs(repo):
+    cycle, goal, run, log = make_plan(repo)
+    tue, wed = date(2026, 10, 6), date(2026, 10, 7)
+    assert repo.log_tactic(run.id, tue, 1) == 1
+    assert repo.log_tactic(run.id, tue, 1) == 2
+    assert repo.log_tactic(run.id, wed, 1) == 1
+    assert repo.log_tactic(log.id, wed, -1) == 0  # never below zero
+    assert repo.logged_between(cycle.id, MON, date(2026, 10, 11)) == {run.id: 3}
+    assert repo.logged_between(cycle.id, wed, wed) == {run.id: 1}
+    assert repo.log_tactic(run.id, wed, -1) == 0
+    assert repo.logged_between(cycle.id, wed, wed) == {}
+
+
+def test_prompts_and_day_reviews_keep_past_wording(repo):
+    cycle, *_ = make_plan(repo)
+    energy = repo.save_prompt(Prompt(None, "daily", "Energy", "rating"))
+    assert [p.label for p in repo.list_prompts("daily")][-1] == "Energy"
+    repo.move_prompt(energy.id, -1)
+    assert [p.label for p in repo.list_prompts("daily")][-2] == "Energy"
+
+    day = date(2026, 10, 6)
+    repo.save_day_review(DayReview(cycle.id, day, answers=[Answer(energy.id, "Energy", "rating", "4")]))
+    repo.save_prompt(Prompt(energy.id, "daily", "Energy level", "rating", active=False))
+    assert [p.label for p in repo.list_prompts("daily", active_only=True)] == [
+        "What went well?", "What got in the way?", "Top tactics for tomorrow"
+    ]
+    repo.delete_prompt(energy.id)
+    review = repo.get_day_review(cycle.id, day)
+    assert [(a.prompt_id, a.label, a.value) for a in review.answers] == [(None, "Energy", "4")]
+    assert repo.reviewed_days(cycle.id, MON, date(2026, 10, 11)) == {day}

@@ -12,6 +12,7 @@ from twy.domain.dates import (
     CyclePosition,
     align_to_week_start,
     current_week,
+    cycle_end,
     last_finished_week,
     week_range,
 )
@@ -27,7 +28,22 @@ from twy.domain.conflicts import (
     weeks_label,
 )
 from twy.domain.schedule import Session, sessions_for_week
-from twy.models import BLOCK_KINDS, Block, Cycle, CycleReview, Goal, Slot, Tactic, WeekEntry, WeekReview, hhmm
+from twy.models import (
+    BLOCK_KINDS,
+    PROMPT_KINDS,
+    Answer,
+    Block,
+    Cycle,
+    CycleReview,
+    DayReview,
+    Goal,
+    Prompt,
+    Slot,
+    Tactic,
+    WeekEntry,
+    WeekReview,
+    hhmm,
+)
 from twy.repo import Repo
 
 OUTCOMES = ("hit", "missed")
@@ -341,6 +357,7 @@ class ReviewRow:
     title: str
     planned: int
     done: int
+    logged: int = 0  # from the Today page's daily logs
 
 
 def reviewable_weeks(cycle: Cycle, today: date) -> list[int]:
@@ -362,8 +379,18 @@ def default_review_week(repo: Repo, cycle: Cycle, today: date) -> int | None:
     return min(default, weeks[-1])
 
 
+def prefill_done(planned: int, logged: int, snapshot: WeekEntry | None) -> int:
+    """The done count a tactic's row starts with on the weekly scorecard.
+
+    `logged` is the total from the Today page's daily logs for that week (it can exceed
+    `planned`). `snapshot` is the entry saved by an earlier review of the week, if any.
+    """
+    # TODO(human): decide how daily logs pre-fill the weekly scorecard.
+    return snapshot.done if snapshot else 0
+
+
 def review_rows(repo: Repo, cycle: Cycle, week_no: int, existing: WeekReview | None = None) -> list[ReviewRow]:
-    """Tactics to score for a week.
+    """Tactics to score for a week, with done counts pre-filled by `prefill_done`.
 
     A reviewed week shows its snapshot (tactics added later are left out); an
     unreviewed week shows the tactics active in it now.
@@ -371,16 +398,19 @@ def review_rows(repo: Repo, cycle: Cycle, week_no: int, existing: WeekReview | N
     if existing is None:
         existing = repo.get_week_review(cycle.id, week_no)
     snapshot = {e.tactic_id: e for e in existing.entries} if existing else {}
+    logged = repo.logged_between(cycle.id, *week_range(cycle.start_date, week_no))
     goals = {g.id: g for g in repo.list_goals(cycle.id)}
     rows = []
     for t in repo.list_tactics(cycle.id):
-        if t.id in snapshot:
-            planned, done = snapshot[t.id].planned, snapshot[t.id].done
+        entry = snapshot.get(t.id)
+        if entry is not None:
+            planned = entry.planned
         elif t.active_in(week_no) and existing is None:
-            planned, done = t.times_per_week, 0
+            planned = t.times_per_week
         else:
             continue
-        rows.append(ReviewRow(t.id, goals[t.goal_id].title, t.title, planned, done))
+        count = logged.get(t.id, 0)
+        rows.append(ReviewRow(t.id, goals[t.goal_id].title, t.title, planned, prefill_done(planned, count, entry), count))
     return rows
 
 
@@ -397,16 +427,121 @@ def save_week(
     cycle: Cycle,
     week_no: int,
     entries: list[WeekEntry],
-    obstacles: str,
-    fix: str,
+    answers: list[Answer],
     progress: dict[int, float | None],
 ) -> float | None:
     """Save a weekly review; the first review moves a planning cycle to active. Returns the score."""
-    review = WeekReview(cycle.id, week_no, obstacles=obstacles.strip(), fix=fix.strip(), entries=entries)
-    repo.save_week_review(review, progress)
+    repo.save_week_review(WeekReview(cycle.id, week_no, entries=entries, answers=answers), progress)
     if cycle.status == "planning":
         repo.set_cycle_status(cycle.id, "active")
     return execution_score(entries)
+
+
+# -- reflections ------------------------------------------------------------------
+
+
+@dataclass
+class ReflectionItem:
+    """One question on a daily or weekly review form."""
+
+    key: str  # form field name
+    prompt_id: int | None
+    label: str
+    kind: str
+    value: str = ""
+
+
+def reflection_items(prompts: list[Prompt], answers: list[Answer]) -> list[ReflectionItem]:
+    """Questions to show for one period, in the current prompt order.
+
+    An answered prompt keeps the wording it was answered under (like the weekly
+    snapshot). Answers to prompts since deleted or hidden come last, so nothing saved is lost.
+    """
+    saved = {a.prompt_id: a for a in answers if a.prompt_id is not None}
+    items = []
+    for p in prompts:
+        a = saved.pop(p.id, None)
+        items.append(ReflectionItem(f"p-{p.id}", p.id, a.label, a.kind, a.value) if a else ReflectionItem(f"p-{p.id}", p.id, p.label, p.kind))
+    items += [
+        ReflectionItem(f"p-{a.prompt_id}" if a.prompt_id else f"a-{i}", a.prompt_id, a.label, a.kind, a.value)
+        for i, a in enumerate(answers)
+        if a.prompt_id is None or a.prompt_id in saved
+    ]
+    return items
+
+
+def parse_answers(items: list[ReflectionItem], form: Mapping[str, str]) -> list[Answer]:
+    """Read posted answers into `items` (so the form can be re-shown) and validate them.
+
+    Blank answers are skipped. Ratings must be 1–5 and yes/no must be "yes" or "no".
+    """
+    answers, error = [], None
+    for item in items:
+        item.value = form.get(item.key, "").strip()
+        if not item.value:
+            continue
+        if item.kind == "rating" and item.value not in ("1", "2", "3", "4", "5"):
+            error = error or f"“{item.label}” must be a rating from 1 to 5."
+        elif item.kind == "yesno" and item.value not in ("yes", "no"):
+            error = error or f"“{item.label}” must be yes or no."
+        answers.append(Answer(item.prompt_id, item.label, item.kind, item.value))
+    if error:
+        raise FormError(error)
+    return answers
+
+
+def parse_prompt_form(prompt: Prompt, fields: Mapping[str, str]) -> Prompt:
+    label = fields.get("label", "").strip()
+    if not label:
+        raise FormError("A prompt needs some text.")
+    kind = fields.get("kind", prompt.kind)
+    if kind not in PROMPT_KINDS:
+        raise FormError("Unknown prompt type.")
+    return replace(prompt, label=label, kind=kind)
+
+
+# -- today ------------------------------------------------------------------------
+
+
+@dataclass
+class TodayRow:
+    tactic_id: int
+    goal_title: str
+    title: str
+    planned: int  # times per week
+    today: int  # logged on this day
+    week: int  # logged over the whole week
+
+
+def loggable(cycle: Cycle, day: date, today: date) -> bool:
+    """Days you can log and reflect on: in weeks 1–12 and not in the future."""
+    return cycle.start_date <= day <= min(today, cycle_end(cycle.start_date))
+
+
+def week_of(cycle: Cycle, day: date) -> int:
+    return (day - cycle.start_date).days // 7 + 1
+
+
+def today_rows(repo: Repo, cycle: Cycle, day: date) -> list[TodayRow]:
+    """Every tactic active in `day`'s week, with what has been logged so far."""
+    week_no = week_of(cycle, day)
+    on_day = repo.logged_between(cycle.id, day, day)
+    in_week = repo.logged_between(cycle.id, *week_range(cycle.start_date, week_no))
+    goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
+    return [
+        TodayRow(t.id, goals[t.goal_id], t.title, t.times_per_week, on_day.get(t.id, 0), in_week.get(t.id, 0))
+        for t in repo.list_tactics(cycle.id)
+        if t.active_in(week_no)
+    ]
+
+
+def week_progress(rows: list[TodayRow]) -> float | None:
+    """Share of the week's planned items logged so far (each tactic capped at its plan)."""
+    return execution_score(WeekEntry(0, 0, r.tactic_id, r.planned, r.week) for r in rows)
+
+
+def save_day(repo: Repo, cycle: Cycle, day: date, answers: list[Answer]) -> None:
+    repo.save_day_review(DayReview(cycle.id, day, answers=answers))
 
 
 # -- week 13 ----------------------------------------------------------------------

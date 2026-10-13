@@ -140,6 +140,43 @@
     document.addEventListener("input", update);
   }
 
+  // Today: log a tactic without reloading the page (the form still works without JavaScript).
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest("[data-log]");
+    if (!form) return;
+    e.preventDefault();
+    let data;
+    try {
+      const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(response.statusText);
+      data = await response.json();
+    } catch {
+      form.submit(); // fall back to a normal post and reload
+      return;
+    }
+    const row = form.closest(".log-row");
+    row.querySelector("[data-today]").textContent = data.today;
+    row.querySelector("[data-week]").textContent = data.week;
+    row.classList.toggle("met", data.week >= Number(row.dataset.planned));
+    const pill = document.querySelector("[data-week-progress]");
+    pill.querySelector("[data-value]").textContent = data.progress;
+    pill.classList.remove("band-good", "band-warn", "band-bad", "band-none");
+    pill.classList.add(`band-${data.band}`);
+  });
+
+  // Ratings and yes/no: tap the chosen answer again to clear it.
+  document.querySelectorAll("[data-clearable]").forEach((group) => {
+    let before = null;
+    group.addEventListener("pointerdown", (e) => {
+      before = e.target.closest("label")?.querySelector("input:checked") ?? null;
+    });
+    group.addEventListener("click", (e) => {
+      const input = e.target.closest("input");
+      if (input && input === before) input.checked = false;
+      before = null;
+    });
+  });
+
   // Week 13: show hit / missed as the final value is typed (same rule as scoring.goal_outcome).
   document.querySelectorAll("[data-final]").forEach((input) => {
     const row = input.closest("[data-target]");
