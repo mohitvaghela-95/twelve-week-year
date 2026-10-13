@@ -26,8 +26,8 @@ from twy.db import backup_to, connect
 from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, WEEKDAY_NAMES, align_to_week_start, current_week, cycle_end, week_range
 from twy.domain.guardrails import heavy_weeks, plan_warnings
 from twy.domain.schedule import feed_weeks, lanes, overlaps, planning_offset
-from twy.domain.scoring import cycle_average, execution_score, format_score, goal_outcome, planned_items
-from twy.models import BLOCK_KINDS, WEEKDAY_SHORT, Block, Cycle, Goal, Slot, Tactic, hhmm
+from twy.domain.scoring import cycle_average, execution_score, format_score, goal_outcome, planned_items, score_band
+from twy.models import BLOCK_KINDS, PROMPT_KINDS, PROMPT_SCOPES, WEEKDAY_SHORT, Block, Cycle, Goal, Prompt, Slot, Tactic, hhmm
 from twy.repo import Repo
 from twy.services import (
     FormError,
@@ -36,6 +36,8 @@ from twy.services import (
     cycle_status,
     default_review_week,
     fmt_num,
+    loggable,
+    parse_answers,
     parse_cycle_form,
     parse_day_window,
     parse_float,
@@ -44,17 +46,23 @@ from twy.services import (
     parse_block_form,
     parse_int,
     parse_max_weekly_items,
+    parse_prompt_form,
     parse_slots,
     parse_tactic_form,
     plan_clashes,
     previous_cycle_id,
+    reflection_items,
     review_rows,
     reviewable_weeks,
+    save_day,
     save_week,
     save_week13,
     schedule_check,
     show_goal_outcomes,
+    today_rows,
     week_entries,
+    week_of,
+    week_progress,
     week_sessions,
 )
 from twy.web.ics import render_calendar
@@ -300,10 +308,11 @@ def trend(cycle_id: int):
     r = repo()
     cycle = load_cycle(cycle_id)
     scores = r.weekly_scores(cycle.id)
+    answers = r.weekly_answers(cycle.id)
     weeks = []
     for w in range(1, EXECUTION_WEEKS + 1):
         first, last = week_range(cycle.start_date, w)
-        weeks.append({"no": w, "first": first, "last": last, "review": r.get_week_review(cycle.id, w), "score": scores.get(w)})
+        weeks.append({"no": w, "first": first, "last": last, "reviewed": w in scores, "answers": answers.get(w, []), "score": scores.get(w)})
     return render_template(
         "trend.html",
         cycle=cycle,
@@ -613,6 +622,91 @@ def week(cycle_id: int, week_no: int):
     )
 
 
+# -- today ------------------------------------------------------------------------
+
+
+def load_day(cycle: Cycle, iso: str) -> date:
+    try:
+        day = date.fromisoformat(iso)
+    except ValueError:
+        abort(404)
+    if not loggable(cycle, day, today()):
+        abort(404)
+    return day
+
+
+@bp.get("/c/<int:cycle_id>/today")
+def today_default(cycle_id: int):
+    cycle = load_cycle(cycle_id)
+    if not loggable(cycle, today(), today()):
+        return render_template("today.html", cycle=cycle, day=None, tab="today")
+    return redirect(url_for(".day_page", cycle_id=cycle.id, iso=today().isoformat()))
+
+
+@bp.route("/c/<int:cycle_id>/day/<iso>", methods=["GET", "POST"])
+def day_page(cycle_id: int, iso: str):
+    r = repo()
+    cycle = load_cycle(cycle_id)
+    day = load_day(cycle, iso)
+    read_only = cycle.status == "closed"
+    existing = r.get_day_review(cycle.id, day)
+    items = reflection_items(r.list_prompts("daily", active_only=True), existing.answers if existing else [])
+    error = None
+
+    if request.method == "POST":
+        if read_only:
+            abort(403, "This cycle is closed and read-only.")
+        try:
+            answers = parse_answers(items, request.form)
+        except FormError as e:
+            error = str(e)
+        else:
+            save_day(r, cycle, day, answers)
+            flash(f"Reflection saved for {day:%a %d %b}.")
+            return redirect(url_for(".day_page", cycle_id=cycle.id, iso=iso, _anchor="reflection"))
+
+    week_no = week_of(cycle, day)
+    first, last = week_range(cycle.start_date, week_no)
+    rows = today_rows(r, cycle, day)
+    return render_template(
+        "today.html",
+        cycle=cycle,
+        day=day,
+        week_no=week_no,
+        days=[first + timedelta(days=i) for i in range(7)],
+        open_days={d for d in (first + timedelta(days=i) for i in range(7)) if loggable(cycle, d, today())},
+        reflected=r.reviewed_days(cycle.id, first, last),
+        today=today(),
+        rows=rows,
+        progress=week_progress(rows),
+        sessions=[s for s in week_sessions(r, cycle, week_no) if s.day == day],
+        kinds=BLOCK_KINDS,
+        existing=existing,
+        items=items,
+        error=error,
+        read_only=read_only,
+        tab="today",
+    ), 422 if error else 200
+
+
+@bp.post("/c/<int:cycle_id>/day/<iso>/log")
+def day_log(cycle_id: int, iso: str):
+    """Log one more (or one less) of a tactic on a day."""
+    r = repo()
+    cycle = writable_cycle(cycle_id)
+    day = load_day(cycle, iso)
+    tactic, _ = load_tactic(cycle, request.form.get("tactic_id", -1, type=int))
+    if not tactic.active_in(week_of(cycle, day)):
+        abort(404)
+    r.log_tactic(tactic.id, day, move_delta())
+    if request.accept_mimetypes.best == "application/json":
+        rows = today_rows(r, cycle, day)
+        row = next(row for row in rows if row.tactic_id == tactic.id)
+        progress = week_progress(rows)
+        return jsonify(today=row.today, week=row.week, progress=format_score(progress), band=score_band(progress))
+    return redirect(url_for(".day_page", cycle_id=cycle.id, iso=iso, _anchor=f"t-{tactic.id}"))
+
+
 # -- weekly review ----------------------------------------------------------------
 
 
@@ -636,10 +730,8 @@ def review(cycle_id: int, week_no: int):
     existing = r.get_week_review(cycle.id, week_no)
     rows = review_rows(r, cycle, week_no, existing)
     lag_goals = [g for g in r.list_goals(cycle.id) if g.measurable]
-    values = {
-        "obstacles": existing.obstacles if existing else "",
-        "fix": existing.fix if existing else "",
-    } | {f"lag-{g.id}": fmt_num(r.goal_progress(g.id).get(week_no)) for g in lag_goals}
+    items = reflection_items(r.list_prompts("weekly", active_only=True), existing.answers if existing else [])
+    values = {f"lag-{g.id}": fmt_num(r.goal_progress(g.id).get(week_no)) for g in lag_goals}
     error = None
 
     if request.method == "POST":
@@ -654,13 +746,17 @@ def review(cycle_id: int, week_no: int):
         entries = week_entries(cycle.id, week_no, rows, done)
         values = {k: request.form.get(k, "") for k in values}
         try:
-            progress = {g.id: parse_float(values[f"lag-{g.id}"]) for g in lag_goals}
-        except ValueError:
-            error = "Lag measures must be numbers."
+            answers = parse_answers(items, request.form)
+            try:
+                progress = {g.id: parse_float(values[f"lag-{g.id}"]) for g in lag_goals}
+            except ValueError:
+                raise FormError("Lag measures must be numbers.") from None
+        except FormError as e:
+            error = str(e)
             for row, entry in zip(rows, entries):
                 row.done = entry.done
         else:
-            score = save_week(r, cycle, week_no, entries, values["obstacles"], values["fix"], progress)
+            score = save_week(r, cycle, week_no, entries, answers, progress)
             flash(f"Week {week_no} saved: {format_score(score)}.")
             return redirect(url_for(".dashboard", cycle_id=cycle.id))
 
@@ -678,6 +774,7 @@ def review(cycle_id: int, week_no: int):
         score=execution_score(week_entries(cycle.id, week_no, rows, {row.tactic_id: row.done for row in rows})),
         lag_goals=lag_goals,
         values=values,
+        items=items,
         error=error,
         read_only=read_only,
         tab="review",
@@ -812,8 +909,70 @@ def settings():
         webcal_url="webcal://" + feed_url.split("://", 1)[1],
         error=error,
         db_path=current_app.config["TWY_DB"],
+        prompts={scope: r.list_prompts(scope) for scope in PROMPT_SCOPES},
+        prompt_kinds=PROMPT_KINDS,
         tab="more",
     )
+
+
+def load_prompt(prompt_id: int) -> Prompt:
+    try:
+        return repo().get_prompt(prompt_id)
+    except KeyError:
+        abort(404)
+
+
+def to_prompts(prompt: Prompt | None = None):
+    return redirect(url_for(".settings", _anchor=f"prompt-{prompt.id}" if prompt else "prompts"))
+
+
+@bp.post("/settings/prompts")
+def prompt_new():
+    scope = request.form.get("scope")
+    if scope not in PROMPT_SCOPES:
+        abort(400)
+    try:
+        prompt = parse_prompt_form(Prompt(None, scope, ""), request.form)
+    except FormError as e:
+        flash(str(e), "warn")
+        return to_prompts()
+    repo().save_prompt(prompt)
+    flash(f"Added “{prompt.label}” to the {scope} review.")
+    return to_prompts(prompt)
+
+
+@bp.post("/settings/prompts/<int:prompt_id>")
+def prompt_edit(prompt_id: int):
+    try:
+        prompt = parse_prompt_form(load_prompt(prompt_id), request.form)
+    except FormError as e:
+        flash(str(e), "warn")
+        return to_prompts()
+    repo().save_prompt(prompt)
+    flash(f"Saved “{prompt.label}”. Past reviews keep the wording they were answered under.")
+    return to_prompts(prompt)
+
+
+@bp.post("/settings/prompts/<int:prompt_id>/toggle")
+def prompt_toggle(prompt_id: int):
+    prompt = load_prompt(prompt_id)
+    repo().save_prompt(replace(prompt, active=not prompt.active))
+    return to_prompts(prompt)
+
+
+@bp.post("/settings/prompts/<int:prompt_id>/move")
+def prompt_move(prompt_id: int):
+    prompt = load_prompt(prompt_id)
+    repo().move_prompt(prompt.id, move_delta())
+    return to_prompts(prompt)
+
+
+@bp.post("/settings/prompts/<int:prompt_id>/delete")
+def prompt_delete(prompt_id: int):
+    prompt = load_prompt(prompt_id)
+    repo().delete_prompt(prompt.id)
+    flash(f"Deleted “{prompt.label}”. Past answers to it are kept.")
+    return to_prompts()
 
 
 @bp.post("/settings/calendar/reset")

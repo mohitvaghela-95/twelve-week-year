@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_reflection.html" import reflection_fields %}
 {% block title %}Review · {{ cycle.name }}{% endblock %}
 {% block content %}
 {% if week_no is none %}
@@ -27,10 +28,11 @@
 
   <section class="card">
     <h2>Scorecard</h2>
-    <p class="muted small">How many times did you do each tactic?</p>
+    <p class="muted small">How many times did you do each tactic? {% if not existing %}Counts start from what you logged on Today.{% endif %}</p>
     {% for r in rows %}
     <div class="score-row" data-planned="{{ r.planned }}">
-      <label class="tactic" for="done-{{ r.tactic_id }}"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}</label>
+      <label class="tactic" for="done-{{ r.tactic_id }}"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}
+        {% if r.logged != r.done %}<span class="muted small logged">{{ r.logged }} logged on Today</span>{% endif %}</label>
       <div class="stepper">
         <button type="button" data-step="-1" aria-label="One less">−</button>
         <input id="done-{{ r.tactic_id }}" name="done-{{ r.tactic_id }}" type="number" value="{{ r.done }}" min="0" max="{{ r.planned }}" inputmode="numeric">
@@ -60,10 +62,8 @@
   {% endif %}
 
   <section class="card">
-    <label for="obstacles">What got in the way?</label>
-    <textarea id="obstacles" name="obstacles" rows="3">{{ values.obstacles }}</textarea>
-    <label for="fix">One fix for next week</label>
-    <textarea id="fix" name="fix" rows="2">{{ values.fix }}</textarea>
+    <h2>Reflection</h2>
+    {{ reflection_fields(items) }}
   </section>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   {% if not read_only %}<button class="btn primary block">Save review</button>{% endif %}

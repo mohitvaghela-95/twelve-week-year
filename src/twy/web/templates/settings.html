@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_form.html" import post_button %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 <h1>Settings</h1>
@@ -20,6 +21,50 @@
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <button class="btn primary block">Save</button>
 </form>
+<section class="card" id="prompts">
+  <h2>Reflection prompts</h2>
+  <p class="muted small">The questions in your daily reflection (on Today) and your weekly review. Changing or deleting one doesn't change past answers.</p>
+  {% for scope in ("daily", "weekly") %}
+  <h3 class="prompt-scope">{{ scope|capitalize }}</h3>
+  <ul class="tactics prompts">
+    {% for p in prompts[scope] %}
+    <li id="prompt-{{ p.id }}" class="{{ 'hidden-prompt' if not p.active }}">
+      <details>
+        <summary>
+          <span>{{ p.label }}</span>
+          <span class="muted small">{{ prompt_kinds[p.kind] }}{{ " · hidden" if not p.active }}</span>
+        </summary>
+        <form method="post" action="{{ url_for('web.prompt_edit', prompt_id=p.id) }}" class="prompt-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <input name="label" value="{{ p.label }}" required aria-label="Prompt text">
+          <select name="kind" aria-label="Answer type">
+            {% for key, text in prompt_kinds.items() %}<option value="{{ key }}" {{ 'selected' if key == p.kind }}>{{ text }}</option>{% endfor %}
+          </select>
+          <button class="btn small">Save</button>
+        </form>
+      </details>
+      <div class="actions">
+        {{ post_button(url_for('web.prompt_move', prompt_id=p.id), "↑", "Move prompt up", delta=-1) }}
+        {{ post_button(url_for('web.prompt_move', prompt_id=p.id), "↓", "Move prompt down", delta=1) }}
+        {{ post_button(url_for('web.prompt_toggle', prompt_id=p.id), "◐" if p.active else "○", "Hide prompt" if p.active else "Show prompt") }}
+        {{ post_button(url_for('web.prompt_delete', prompt_id=p.id), "🗑", "Delete prompt", confirm="Delete “" ~ p.label ~ "”? Past answers to it are kept.") }}
+      </div>
+    </li>
+    {% else %}
+    <li class="muted">No {{ scope }} prompts.</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('web.prompt_new') }}" class="prompt-form add">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input name="label" required placeholder="New {{ scope }} prompt" aria-label="New {{ scope }} prompt">
+    <select name="kind" aria-label="Answer type">
+      {% for key, text in prompt_kinds.items() %}<option value="{{ key }}">{{ text }}</option>{% endfor %}
+    </select>
+    <button class="btn small">Add</button>
+  </form>
+  {% endfor %}
+</section>
 <section class="card stack" id="calendar">
   <h2>Calendar</h2>
   <p class="muted small">Subscribe once and this week's tactic sessions and time blocks appear in Calendar on your iPhone, iPad or Mac. From the day of your weekly review block, next week shows too. It refreshes on its own while the device is on your home Wi-Fi.</p>

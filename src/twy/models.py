@@ -105,14 +105,48 @@ class WeekEntry:
     done: int
 
 
+PROMPT_KINDS = {"text": "Text", "rating": "Rating 1–5", "yesno": "Yes / no"}
+PROMPT_SCOPES = ("daily", "weekly")
+
+
+@dataclass
+class Prompt:
+    """A reflection question asked in every daily or weekly review."""
+
+    id: int | None
+    scope: str  # daily | weekly
+    label: str
+    kind: str = "text"  # text | rating | yesno
+    active: bool = True
+    position: int = 0
+
+
+@dataclass
+class Answer:
+    """One reflection answer. label and kind are copied from the prompt when saved."""
+
+    prompt_id: int | None
+    label: str
+    kind: str
+    value: str
+    position: int = 0
+
+
 @dataclass
 class WeekReview:
     cycle_id: int
     week_no: int
-    obstacles: str = ""
-    fix: str = ""
     reviewed_at: datetime | None = None
     entries: list[WeekEntry] = field(default_factory=list)
+    answers: list[Answer] = field(default_factory=list)
+
+
+@dataclass
+class DayReview:
+    cycle_id: int
+    day: date
+    reviewed_at: datetime | None = None
+    answers: list[Answer] = field(default_factory=list)
 
 
 @dataclass

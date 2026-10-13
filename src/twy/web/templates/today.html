@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "_reflection.html" import reflection_fields %}
+{% block title %}{{ "Today" if day is none or day == today else day.strftime("%a %d %b") }} · {{ cycle.name }}{% endblock %}
+{% macro log_button(t, delta) -%}
+<form method="post" action="{{ url_for('web.day_log', cycle_id=cycle.id, iso=day.isoformat()) }}" class="inline" data-log>
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="tactic_id" value="{{ t.tactic_id }}">
+  <input type="hidden" name="delta" value="{{ delta }}">
+  <button aria-label="{{ 'One more' if delta > 0 else 'One less' }}: {{ t.title }}">{{ "+" if delta > 0 else "−" }}</button>
+</form>
+{%- endmacro %}
+{% block content %}
+{% if day is none %}
+<h1>Today</h1>
+<section class="card empty">
+  <p>Nothing to track today.</p>
+  <p class="muted small">“{{ cycle.name }}” runs {{ cycle.start_date.strftime("%a %d %b") }} for 12 weeks. Daily tracking opens on its first day.</p>
+</section>
+{% else %}
+<nav class="weekpicker" aria-label="Day">
+  {% for d in days %}
+  {% set label = WEEKDAY_SHORT[d.weekday()] ~ " " ~ d.day %}
+  {% if d in open_days %}
+  <a class="chip{{ ' on' if d == day }}{{ ' done' if d in reflected }}" href="{{ url_for('web.day_page', cycle_id=cycle.id, iso=d.isoformat()) }}"
+     {% if d == day %}aria-current="page"{% endif %}>{{ label }}{% if d in reflected %}<span aria-label="reflected">✓</span>{% endif %}</a>
+  {% else %}
+  <span class="chip off" aria-disabled="true">{{ label }}</span>
+  {% endif %}
+  {% endfor %}
+</nav>
+<div class="page-head">
+  <h1>{{ "Today" if day == today else day.strftime("%A") }}</h1>
+  <span class="tag">{{ day.day }} {{ day.strftime("%b") }}</span>
+</div>
+<p class="muted">{{ cycle.name }} · week {{ week_no }} · <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=week_no) }}">Weekly review ›</a></p>
+{% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
+
+<div class="scorepill band-{{ progress|band }}" data-week-progress>
+  <span>Week so far <strong data-value>{{ progress|score }}</strong></span><span class="muted small">target 85%</span>
+</div>
+
+{% if sessions %}
+<section class="card">
+  <h2>Scheduled</h2>
+  {% for s in sessions %}
+  <{{ "a" if s.owner == "tactic" else "div" }} class="session kind-{{ s.kind }}"{% if s.owner == "tactic" %} href="#t-{{ s.owner_id }}"{% endif %}>
+    <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
+    <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}</span></span>
+  </{{ "a" if s.owner == "tactic" else "div" }}>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Tactics</h2>
+  <p class="muted small">Tap + each time you do one. These counts fill in your weekly review.</p>
+  {% for t in rows %}
+  <div class="score-row log-row{{ ' met' if t.week >= t.planned }}" id="t-{{ t.tactic_id }}" data-planned="{{ t.planned }}">
+    <div class="tactic">
+      <span class="muted small">{{ t.goal_title }}</span>
+      {{ t.title }}
+      <span class="muted small week-count"><span data-week>{{ t.week }}</span> / {{ t.planned }} this week</span>
+    </div>
+    <div class="stepper">
+      {% if not read_only %}{{ log_button(t, -1) }}{% endif %}
+      <output data-today aria-label="Done {{ 'today' if day == today else 'this day' }}">{{ t.today }}</output>
+      {% if not read_only %}{{ log_button(t, 1) }}{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">No tactics this week. <a href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Plan your cycle</a>.</p>
+  {% endfor %}
+</section>
+
+<form method="post" class="card stack" id="reflection">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <div class="card-head">
+    <h2>Daily reflection</h2>
+    {% if existing %}<span class="tag good">✓ saved</span>{% endif %}
+  </div>
+  <fieldset class="plain" {{ 'disabled' if read_only }}>
+    {{ reflection_fields(items) }}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if not read_only and items %}<button class="btn primary block">Save reflection</button>{% endif %}
+  </fieldset>
+</form>
+{% endif %}
+{% endblock %}

@@ -6,11 +6,20 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 
 - **Home:** the current week, your last and average score, a mini trend, and goals with their lag measures.
 - **Plan:** goals and tactics, reordering, soft warnings and items per week, then **Start cycle**.
-- **Review:** a −/+ done count per tactic, a live score, lag values, obstacles and a fix.
+- **Today:** tap + as you finish each tactic, see how the week is going, and write a short daily reflection.
+- **Review:** a −/+ done count per tactic (starting from what you logged on Today), a live score, lag values and your weekly reflection.
 - **Trend:** a 12-week chart with the 85% line, plus weekly notes.
 - **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
 - **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged.
-- **Cycles, Vision, Settings:** past cycles are read-only. Settings has the backup download and the calendar link.
+- **Cycles, Vision, Settings:** past cycles are read-only. Settings has your reflection prompts, the backup download and the calendar link.
+
+## Daily tracking and reflections
+
+**Today** lists every tactic in this week's plan with a −/+ count for the day and a running “3 / 5 this week” total. Today's calendar sessions are shown above. Use the day chips to catch up on an earlier day this week. Future days and Week 13 can't be logged.
+
+When you open a week's review, each tactic's done count starts from that week's daily logs, and you can still change it before saving. Once saved, the review is the record that the score uses. A tactic whose logs differ from its saved count shows “N logged on Today”.
+
+The questions in the daily reflection and in the weekly review are set in Settings → **Reflection prompts**. Each one is free text, a 1–5 rating or yes/no. Add, rename, reorder, hide or delete them as you like. Answers keep the wording they were saved under, so editing or deleting a prompt never changes past reviews.
 
 ## Calendar
 

@@ -1,0 +1,32 @@
+{#- Reflection questions for the daily and weekly reviews. The prompts are set in Settings. -#}
+{% macro reflection_fields(items) -%}
+{% for item in items %}
+<div class="reflect-item">
+  {% if item.kind == "text" %}
+  <label for="{{ item.key }}">{{ item.label }}</label>
+  <textarea id="{{ item.key }}" name="{{ item.key }}" rows="2">{{ item.value }}</textarea>
+  {% else %}
+  <fieldset class="plain">
+    <legend>{{ item.label }}</legend>
+    <div class="segmented" data-clearable>
+      {% for value, text in ([("1", "1"), ("2", "2"), ("3", "3"), ("4", "4"), ("5", "5")] if item.kind == "rating" else [("yes", "Yes"), ("no", "No")]) %}
+      <label><input type="radio" name="{{ item.key }}" value="{{ value }}" {{ 'checked' if item.value == value }}><span>{{ text }}</span></label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted small">No reflection prompts. Add some in <a href="{{ url_for('web.settings', _anchor='prompts') }}">Settings</a>.</p>
+{% endfor %}
+{%- endmacro %}
+
+{#- Saved answers, read-only (trend page). -#}
+{% macro answer_list(answers) -%}
+<dl>
+  {% for a in answers %}
+  <dt>{{ a.label }}</dt>
+  <dd>{% if a.kind == "rating" %}{{ a.value }} / 5{% elif a.kind == "yesno" %}{{ a.value|capitalize }}{% else %}{{ a.value }}{% endif %}</dd>
+  {% endfor %}
+</dl>
+{%- endmacro %}

@@ -6,6 +6,7 @@ from datetime import date
 import pytest
 
 from twy.db import connect
+from twy.models import Goal, Tactic
 from twy.repo import Repo
 from twy.web import create_app
 
@@ -105,23 +106,26 @@ def test_full_cycle_flow(client, db_path):
     assert "pending for week 1" in client.get(base).text
     assert client.get(f"{base}/review").location == f"{base}/review/1"
     assert client.get(f"{base}/review/5").status_code == 404  # not reachable yet
+    obstacles, fix = (p.id for p in repo.list_prompts("weekly"))
 
     response = post(
         client,
         f"{base}/review/1",
-        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "x", "obstacles": "Rain", "fix": "Gym"},
+        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "x", f"p-{obstacles}": "Rain", f"p-{fix}": "Gym"},
     )
     assert response.status_code == 422 and "Lag measures must be numbers." in response.text
+    assert ">Rain</textarea>" in response.text  # answers survive the error
     post(
         client,
         f"{base}/review/1",
-        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "80.5", "obstacles": "Rain", "fix": "Gym"},
+        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "80.5", f"p-{obstacles}": "Rain", f"p-{fix}": "Gym"},
     )
     assert repo.weekly_scores(cycle.id) == {1: 0.75}  # (2 + 1 clamped) / 4
     assert repo.latest_progress(goal.id) == 80.5
     dashboard = client.get(base).text
     assert "75%" in dashboard and "pending" not in dashboard
-    assert client.get(f"{base}/trend").text.count('class="bar band-warn"') == 1
+    trend = client.get(f"{base}/trend").text
+    assert trend.count('class="bar band-warn"') == 1 and "<dd>Rain</dd>" in trend
 
     # Week 13: save, then close and start the next cycle with the plan copied.
     response = post(client, f"{base}/week13", {f"final-{goal.id}": "76", "lessons": "Earlier", "action": "save"})
@@ -150,6 +154,8 @@ def test_closed_cycle_is_read_only(client, db_path):
 
     assert post(client, f"{base}/goals/new", {"title": "x"}).status_code == 403
     assert post(client, f"{base}/review/1", {}).status_code == 403
+    assert post(client, f"{base}/day/2026-06-02", {}).status_code == 403
+    assert post(client, f"{base}/day/2026-06-02/log", {"tactic_id": "1"}).status_code == 403
     assert post(client, f"{base}/week13", {"action": "save"}).status_code == 403
     assert "read-only" in client.get(base).text
     assert client.get(f"{base}/review/1").status_code == 200
@@ -170,12 +176,15 @@ def test_backup_download_is_a_valid_database(client, tmp_path):
     assert conn.execute("PRAGMA journal_mode").fetchone() == ("delete",)
 
 
-def test_every_page_renders(client):
+def test_every_page_renders(client, db_path):
     login(client)
     post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
     post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
-    for url in ["/c/1", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/c/1/week/1", "/c/1/blocks/new", "/cycles", "/vision", "/settings", "/more"]:
+    for url in ["/c/1", "/c/1/day/2026-10-14", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/c/1/week/1", "/c/1/blocks/new", "/cycles", "/vision", "/settings", "/more"]:
         assert client.get(url).status_code == 200, url
+    assert client.get("/c/1/today").location == "/c/1/day/2026-10-14"
+    later = repo_for(db_path).create_cycle("Later", date(2027, 1, 4), 0)
+    assert "Nothing to track today." in client.get(f"/c/{later.id}/today").text
 
 
 def test_heavy_week_limit_setting(client, db_path):
@@ -313,3 +322,68 @@ def test_suggestion_hours_setting(client, db_path):
     assert response.status_code == 200 and "30 minutes before" in response.text
     assert post(client, "/settings", {**form, "day_start": "08:00", "day_end": "20:00"}).status_code == 302
     assert repo.day_window == (480, 1200)
+
+
+def test_today_logging_and_daily_reflection(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Autumn", date(2026, 10, 5), 0)
+    repo.set_cycle_status(cycle.id, "active")
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=3))
+    base = f"/c/{cycle.id}"
+
+    assert client.get(f"{base}/today").location == f"{base}/day/2026-10-14"
+    assert client.get(f"{base}/day/2026-10-15").status_code == 404  # tomorrow
+    assert client.get(f"{base}/day/2026-10-04").status_code == 404  # before the cycle
+    assert client.get(f"{base}/day/nonsense").status_code == 404
+
+    # Without JavaScript: post and come back to the row.
+    response = post(client, f"{base}/day/2026-10-14/log", {"tactic_id": str(run.id), "delta": "1"})
+    assert response.location == f"{base}/day/2026-10-14#t-{run.id}"
+    # With JavaScript: a JSON answer for updating the row in place.
+    data = post(client, f"{base}/day/2026-10-13/log", {"tactic_id": str(run.id), "delta": "1"},
+                headers={"Accept": "application/json"}).json
+    assert data == {"today": 1, "week": 2, "progress": "67%", "band": "warn"}
+    post(client, f"{base}/day/2026-10-13/log", {"tactic_id": str(run.id), "delta": "-1"})
+    assert repo.logged_between(cycle.id, date(2026, 10, 12), date(2026, 10, 18)) == {run.id: 1}
+    assert post(client, f"{base}/day/2026-10-14/log", {"tactic_id": "999"}).status_code == 404
+    assert "<span data-week>1</span> / 3 this week" in client.get(f"{base}/day/2026-10-14").text
+
+    # Daily reflection with a rating prompt added in Settings.
+    post(client, "/settings/prompts", {"scope": "daily", "label": "Energy", "kind": "rating"})
+    energy = repo.list_prompts("daily")[-1]
+    went_well = repo.list_prompts("daily")[0]
+    response = post(client, f"{base}/day/2026-10-14", {f"p-{energy.id}": "7"})
+    assert response.status_code == 422 and "rating from 1 to 5" in response.text
+    response = post(client, f"{base}/day/2026-10-14", {f"p-{went_well.id}": "Ran early", f"p-{energy.id}": "4"})
+    assert response.location == f"{base}/day/2026-10-14#reflection"
+    review = repo.get_day_review(cycle.id, date(2026, 10, 14))
+    assert [(a.label, a.value) for a in review.answers] == [("What went well?", "Ran early"), ("Energy", "4")]
+    page = client.get(f"{base}/day/2026-10-14").text
+    assert "✓ saved" in page and 'value="4" checked' in page
+
+
+def test_settings_prompts(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    page = client.get("/settings").text
+    assert "Reflection prompts" in page and "One fix for next week" in page
+
+    response = post(client, "/settings/prompts", {"scope": "weekly", "label": "Slept well?", "kind": "yesno"})
+    slept = repo.list_prompts("weekly")[-1]
+    assert response.location == f"/settings#prompt-{slept.id}" and slept.kind == "yesno"
+    assert post(client, "/settings/prompts", {"scope": "monthly", "label": "x"}).status_code == 400
+    post(client, "/settings/prompts", {"scope": "weekly", "label": " "})
+    assert len(repo.list_prompts("weekly")) == 3  # blank label rejected
+
+    post(client, f"/settings/prompts/{slept.id}", {"label": "Slept 7h+?", "kind": "yesno"})
+    post(client, f"/settings/prompts/{slept.id}/move", {"delta": "-1"})
+    post(client, f"/settings/prompts/{slept.id}/toggle")
+    assert [(p.label, p.active) for p in repo.list_prompts("weekly")] == [
+        ("What got in the way?", True), ("Slept 7h+?", False), ("One fix for next week", True)
+    ]
+    post(client, f"/settings/prompts/{slept.id}/delete")
+    assert len(repo.list_prompts("weekly")) == 2
+    assert post(client, f"/settings/prompts/{slept.id}/delete").status_code == 404
