@@ -1,0 +1,111 @@
+# Build and test every pull request and push; deploy to the home server only on pushes to main.
+#
+# Deploy setup (one time) is described in the README under "Automatic deploys from GitHub".
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede stale PR runs, but never cancel a run on main part-way through a deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: twy:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container
+        run: |
+          docker run -d --name twy -e TWY_PASSWORD=ci -p 8000:8000 twy:ci
+          # Until gunicorn listens, Docker's port proxy accepts and then resets connections,
+          # which --retry-connrefused doesn't count as retryable.
+          if ! curl -fsS --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/healthz; then
+            docker logs twy
+            exit 1
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Run tests
+        run: uv run --locked pytest -q
+
+  deploy:
+    name: Deploy to home server
+    needs: [build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Secrets live on this environment, which only main can deploy to.
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_SERVER: ${{ secrets.DEPLOY_SERVER }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Join the tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: scripts/deploy.sh "$DEPLOY_SERVER"
+
+      - name: Check the app is healthy
+        run: |
+          # compose up returns once the container starts; wait until the app answers.
+          # exec'ing inside the container sidesteps whichever TWY_PORT the server uses.
+          check='docker exec twy python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz\")"'
+          for attempt in $(seq 1 30); do
+            if ssh "$DEPLOY_SERVER" "$check" >/dev/null 2>&1; then
+              echo "Healthy after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The app did not become healthy within about a minute. Recent logs:" >&2
+          ssh "$DEPLOY_SERVER" 'cd twy && docker compose logs --tail 50' || true
+          exit 1
