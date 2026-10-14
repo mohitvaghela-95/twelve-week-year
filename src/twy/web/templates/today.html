@@ -80,7 +80,7 @@
   </div>
   <fieldset class="plain" {{ 'disabled' if read_only }}>
     {{ reflection_fields(items) }}
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
     {% if not read_only and items %}<button class="btn primary block">Save reflection</button>{% endif %}
   </fieldset>
 </form>

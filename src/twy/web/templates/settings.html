@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_form.html" import post_button %}
 {% block title %}Settings{% endblock %}
+{% block back %}{{ url_for('web.more') }}{% endblock %}{% block back_label %}More{% endblock %}{% block back_where %}mobile{% endblock %}
 {% block content %}
 <h1>Settings</h1>
 <form method="post" class="card stack">
@@ -18,7 +19,7 @@
   <label for="day_start">Suggest times between</label>
   <div class="with-unit"><input id="day_start" name="day_start" type="time" required value="{{ day_start }}"><span class="muted">and</span><input id="day_end" name="day_end" type="time" required value="{{ day_end }}" aria-label="Suggest times until"></div>
   <p class="muted small">When a calendar time clashes, twy offers free times within these hours.</p>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <button class="btn primary block">Save</button>
 </form>
 <section class="card" id="prompts">
@@ -85,8 +86,4 @@
   <p class="muted small">Everything lives in one SQLite file on the server:<br><code>{{ db_path }}</code></p>
   <a class="btn block" href="{{ url_for('web.backup') }}" download>Download backup</a>
 </section>
-<form method="post" action="{{ url_for('auth.logout') }}" class="desktop-only">
-  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-  <button class="btn">Log out</button>
-</form>
 {% endblock %}

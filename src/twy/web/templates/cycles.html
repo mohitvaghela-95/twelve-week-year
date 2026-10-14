@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Cycles{% endblock %}
+{% block back %}{{ url_for('web.more') }}{% endblock %}{% block back_label %}More{% endblock %}{% block back_where %}mobile{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Cycles</h1><a class="btn small" href="{{ url_for('web.new_cycle') }}">+ New</a></div>
 {% for row in rows %}

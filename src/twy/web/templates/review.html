@@ -75,7 +75,7 @@
     <h2>Reflection</h2>
     {{ reflection_fields(items) }}
   </section>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if not read_only %}<button class="btn primary block">Save review</button>{% endif %}
   </fieldset>
 </form>

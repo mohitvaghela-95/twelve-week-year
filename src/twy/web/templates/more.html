@@ -3,9 +3,11 @@
 {% block content %}
 <h1>More</h1>
 <nav class="card menu">
-  <a href="{{ url_for('web.plan', cycle_id=nav_cycle_id) if nav_cycle_id else url_for('web.index') }}">Plan<span>›</span></a>
-  <a href="{{ url_for('web.trend', cycle_id=nav_cycle_id) if nav_cycle_id else url_for('web.index') }}">Trend<span>›</span></a>
-  <a href="{{ url_for('web.week13', cycle_id=nav_cycle_id) if nav_cycle_id else url_for('web.index') }}">Week 13 review<span>›</span></a>
+  {% if nav_cycle_id %}
+  <a href="{{ url_for('web.week_default', cycle_id=nav_cycle_id) }}">Week schedule<span>›</span></a>
+  <a href="{{ url_for('web.trend', cycle_id=nav_cycle_id) }}">Trend<span>›</span></a>
+  <a href="{{ url_for('web.week13', cycle_id=nav_cycle_id) }}">Week 13 review<span>›</span></a>
+  {% endif %}
   <a href="{{ url_for('web.cycles') }}">Cycles<span>›</span></a>
   <a href="{{ url_for('web.vision') }}">Vision<span>›</span></a>
   <a href="{{ url_for('web.settings') }}">Settings &amp; backup<span>›</span></a>

@@ -219,6 +219,7 @@ def test_every_page_renders(client, db_path):
     ]:
         assert client.get(url).status_code == 200, url
     assert client.get("/c/1/today").location == "/c/1/day/2026-10-14"
+    assert client.get("/static/manifest.json").status_code == 200
     later = repo_for(db_path).create_cycle("Later", date(2027, 1, 4), 0)
     assert "Nothing to track today." in client.get(f"/c/{later.id}/today").text
 
@@ -466,3 +467,18 @@ def test_settings_prompts(client, db_path):
     post(client, f"/settings/prompts/{slept.id}/delete")
     assert len(repo.list_prompts("weekly")) == 2
     assert post(client, f"/settings/prompts/{slept.id}/delete").status_code == 404
+
+
+def test_navigation_highlights_and_back_links(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
+    plan = client.get("/c/1/plan").text
+    assert 'href="/c/1/plan" class=" on" aria-current="page"' in plan
+    settings = client.get("/settings").text
+    # Settings sits under More on phones and has its own sidebar item on wide screens.
+    assert 'class="mobile-only on"' in settings
+    assert 'class="desktop-only on" aria-current="page"><svg' in settings
+    assert 'class="back mobile-only" href="/more">‹ More</a>' in settings
+    goal_form = client.get("/c/1/goals/new").text
+    assert 'class="back" href="/c/1/plan">‹ Plan</a>' in goal_form

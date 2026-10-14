@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import answer_list %}
 {% block title %}Trend · {{ cycle.name }}{% endblock %}
+{% block back %}{{ url_for('web.more') }}{% endblock %}{% block back_label %}More{% endblock %}{% block back_where %}mobile{% endblock %}
 {% block content %}
 <h1>Trend</h1>
 <p class="muted">{{ cycle.name }} · average <strong>{{ average|score }}</strong> over {{ reviewed_count }} reviewed week{{ "" if reviewed_count == 1 else "s" }}</p>
