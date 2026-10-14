@@ -101,8 +101,7 @@ class Repo:
     def set_setting(self, key: str, value: str) -> None:
         with self.conn:
             self.conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
 
@@ -217,9 +216,7 @@ class Repo:
     # -- goals ------------------------------------------------------------------
 
     def list_goals(self, cycle_id: int) -> list[Goal]:
-        rows = self.conn.execute(
-            "SELECT * FROM goal WHERE cycle_id = ? ORDER BY position, id", (cycle_id,)
-        )
+        rows = self.conn.execute("SELECT * FROM goal WHERE cycle_id = ? ORDER BY position, id", (cycle_id,))
         return [_goal(r) for r in rows]
 
     def get_goal(self, goal_id: int) -> Goal:
@@ -268,9 +265,7 @@ class Repo:
         return [_tactic(r) for r in rows]
 
     def list_tactics_for_goal(self, goal_id: int) -> list[Tactic]:
-        rows = self.conn.execute(
-            "SELECT * FROM tactic WHERE goal_id = ? ORDER BY position, id", (goal_id,)
-        )
+        rows = self.conn.execute("SELECT * FROM tactic WHERE goal_id = ? ORDER BY position, id", (goal_id,))
         return [_tactic(r) for r in rows]
 
     def get_tactic(self, tactic_id: int) -> Tactic:
@@ -496,7 +491,9 @@ class Repo:
                     (tactic_id, day.isoformat(), count),
                 )
             else:
-                self.conn.execute("DELETE FROM tactic_log WHERE tactic_id = ? AND day = ?", (tactic_id, day.isoformat()))
+                self.conn.execute(
+                    "DELETE FROM tactic_log WHERE tactic_id = ? AND day = ?", (tactic_id, day.isoformat())
+                )
         return count
 
     def logged_on(self, tactic_id: int, day: date) -> int:

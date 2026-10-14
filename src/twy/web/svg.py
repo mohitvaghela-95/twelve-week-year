@@ -17,8 +17,10 @@ def score_chart_svg(scores: dict[int, float | None], compact: bool = False) -> M
         return top + plot_h * (1 - value)
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="Execution score by week, target {TARGET_SCORE:.0%}">'
+        (
+            f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+            f'aria-label="Execution score by week, target {TARGET_SCORE:.0%}">'
+        )
     ]
     for value in (0, 0.5, 1):
         parts.append(f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(value):.1f}" y2="{y(value):.1f}"/>')
@@ -39,6 +41,8 @@ def score_chart_svg(scores: dict[int, float | None], compact: bool = False) -> M
 
     target_y = y(TARGET_SCORE)
     parts.append(f'<line class="target" x1="{left}" x2="{width - right}" y1="{target_y:.1f}" y2="{target_y:.1f}"/>')
-    parts.append(f'<text class="target-label" x="{width - right + 4}" y="{target_y + 3.5:.1f}">{TARGET_SCORE:.0%}</text>')
+    parts.append(
+        f'<text class="target-label" x="{width - right + 4}" y="{target_y + 3.5:.1f}">{TARGET_SCORE:.0%}</text>'
+    )
     parts.append("</svg>")
     return Markup("".join(parts))

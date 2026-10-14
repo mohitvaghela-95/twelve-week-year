@@ -111,14 +111,26 @@ def test_full_cycle_flow(client, db_path):
     response = post(
         client,
         f"{base}/review/1",
-        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "x", f"p-{obstacles}": "Rain", f"p-{fix}": "Gym"},
+        {
+            f"done-{run.id}": "2",
+            f"done-{log.id}": "9",
+            f"lag-{goal.id}": "x",
+            f"p-{obstacles}": "Rain",
+            f"p-{fix}": "Gym",
+        },
     )
     assert response.status_code == 422 and "Lag measures must be numbers." in response.text
     assert ">Rain</textarea>" in response.text  # answers survive the error
     post(
         client,
         f"{base}/review/1",
-        {f"done-{run.id}": "2", f"done-{log.id}": "9", f"lag-{goal.id}": "80.5", f"p-{obstacles}": "Rain", f"p-{fix}": "Gym"},
+        {
+            f"done-{run.id}": "2",
+            f"done-{log.id}": "9",
+            f"lag-{goal.id}": "80.5",
+            f"p-{obstacles}": "Rain",
+            f"p-{fix}": "Gym",
+        },
     )
     assert repo.weekly_scores(cycle.id) == {1: 0.75}  # (2 + 1 clamped) / 4
     assert repo.latest_progress(goal.id) == 80.5
@@ -180,7 +192,20 @@ def test_every_page_renders(client, db_path):
     login(client)
     post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
     post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
-    for url in ["/c/1", "/c/1/day/2026-10-14", "/c/1/plan", "/c/1/review/1", "/c/1/trend", "/c/1/week13", "/c/1/week/1", "/c/1/blocks/new", "/cycles", "/vision", "/settings", "/more"]:
+    for url in [
+        "/c/1",
+        "/c/1/day/2026-10-14",
+        "/c/1/plan",
+        "/c/1/review/1",
+        "/c/1/trend",
+        "/c/1/week13",
+        "/c/1/week/1",
+        "/c/1/blocks/new",
+        "/cycles",
+        "/vision",
+        "/settings",
+        "/more",
+    ]:
         assert client.get(url).status_code == 200, url
     assert client.get("/c/1/today").location == "/c/1/day/2026-10-14"
     later = repo_for(db_path).create_cycle("Later", date(2027, 1, 4), 0)
@@ -195,7 +220,11 @@ def test_heavy_week_limit_setting(client, db_path):
     cycle = repo.current_cycle()
     post(client, f"/c/{cycle.id}/goals/new", {"title": "AI engineer offer"})
     goal = repo.list_goals(cycle.id)[0]
-    post(client, f"/c/{cycle.id}/goals/{goal.id}/tactics/new", {"title": "Study", "times": "5", "start": "1", "end": "12"})
+    post(
+        client,
+        f"/c/{cycle.id}/goals/{goal.id}/tactics/new",
+        {"title": "Study", "times": "5", "start": "1", "end": "12"},
+    )
 
     assert repo.max_weekly_items == 25
     assert 'value="25"' in client.get("/settings").text
@@ -206,7 +235,12 @@ def test_heavy_week_limit_setting(client, db_path):
     assert response.status_code == 200 and "whole number" in response.text
     assert repo.max_weekly_items == 25  # nothing saved
 
-    assert post(client, "/settings", {"week_start": "0", "max_weekly_items": "4", "alert_minutes": "10", **DAY}).status_code == 302
+    assert (
+        post(
+            client, "/settings", {"week_start": "0", "max_weekly_items": "4", "alert_minutes": "10", **DAY}
+        ).status_code
+        == 302
+    )
     assert repo.max_weekly_items == 4
     page = client.get(f"/c/{cycle.id}/plan").text
     assert "Heavy weeks (&gt; 4 items)" in page and "load-cell heavy" in page
@@ -238,7 +272,13 @@ def test_schedule_week_page_and_calendar_feed(client, db_path):
     assert "has 2 slots in the calendar but is planned 5×/week" in plan
 
     assert 'value="Weekly review"' in client.get(f"{base}/blocks/new?kind=review").text
-    review = {"title": "Weekly review", "kind": "review", "slot_day": ["6"], "slot_time": ["18:00"], "slot_minutes": ["30"]}
+    review = {
+        "title": "Weekly review",
+        "kind": "review",
+        "slot_day": ["6"],
+        "slot_time": ["18:00"],
+        "slot_minutes": ["30"],
+    }
     assert post(client, f"{base}/blocks/new", review).status_code == 302
     admin = {"title": "Admin", "kind": "admin", "slot_day": ["0"], "slot_time": ["07:30"], "slot_minutes": ["30"]}
     post(client, f"{base}/blocks/new", admin)  # clashes with Monday's study session
@@ -273,13 +313,28 @@ def test_clash_hints_and_plan_warnings(client, db_path):
     base = f"/c/{cycle.id}"
     post(client, f"{base}/goals/new", {"title": "Fitness"})
     goal = repo.list_goals(cycle.id)[0]
-    gym = {"title": "Gym", "times": "1", "start": "7", "end": "12", "slot_day": ["0"], "slot_time": ["07:00"], "slot_minutes": ["60"]}
+    gym = {
+        "title": "Gym",
+        "times": "1",
+        "start": "7",
+        "end": "12",
+        "slot_day": ["0"],
+        "slot_time": ["07:00"],
+        "slot_minutes": ["60"],
+    }
     post(client, f"{base}/goals/{goal.id}/tactics/new", gym)
     assert f'data-check-url="{base}/schedule/check"' in client.get(f"{base}/goals/{goal.id}/tactics/new").text
 
     def check(start, end, times, owner="tactic", owner_id=""):
-        form = {"owner": owner, "owner_id": owner_id, "start": start, "end": end,
-                "slot_day": ["0"] * len(times), "slot_time": times, "slot_minutes": ["60"] * len(times)}
+        form = {
+            "owner": owner,
+            "owner_id": owner_id,
+            "start": start,
+            "end": end,
+            "slot_day": ["0"] * len(times),
+            "slot_time": times,
+            "slot_minutes": ["60"] * len(times),
+        }
         response = post(client, f"{base}/schedule/check", form)
         assert response.status_code == 200
         return response.get_json()["rows"]
@@ -300,8 +355,15 @@ def test_clash_hints_and_plan_warnings(client, db_path):
     assert client.post(f"{base}/schedule/check", data={"owner": "tactic"}).status_code == 400  # no CSRF token
 
     # Saved anyway: the Plan page lists the pair once, linking to the first item.
-    study = {"title": "Study", "times": "2", "start": "1", "end": "12",
-             "slot_day": ["0", "1"], "slot_time": ["07:30", "07:30"], "slot_minutes": ["60", "60"]}
+    study = {
+        "title": "Study",
+        "times": "2",
+        "start": "1",
+        "end": "12",
+        "slot_day": ["0", "1"],
+        "slot_time": ["07:30", "07:30"],
+        "slot_minutes": ["60", "60"],
+    }
     post(client, f"{base}/goals/{goal.id}/tactics/new", {**study, "slot_day": ["0", "0"]})
     page = client.get(f"{base}/plan").text
     assert "“Gym” overlaps “Study” on Mon (weeks 7–12)." in page
@@ -343,8 +405,12 @@ def test_today_logging_and_daily_reflection(client, db_path):
     response = post(client, f"{base}/day/2026-10-14/log", {"tactic_id": str(run.id), "delta": "1"})
     assert response.location == f"{base}/day/2026-10-14#t-{run.id}"
     # With JavaScript: a JSON answer for updating the row in place.
-    data = post(client, f"{base}/day/2026-10-13/log", {"tactic_id": str(run.id), "delta": "1"},
-                headers={"Accept": "application/json"}).json
+    data = post(
+        client,
+        f"{base}/day/2026-10-13/log",
+        {"tactic_id": str(run.id), "delta": "1"},
+        headers={"Accept": "application/json"},
+    ).json
     assert data == {"today": 1, "week": 2, "progress": "67%", "band": "warn"}
     post(client, f"{base}/day/2026-10-13/log", {"tactic_id": str(run.id), "delta": "-1"})
     assert repo.logged_between(cycle.id, date(2026, 10, 12), date(2026, 10, 18)) == {run.id: 1}
@@ -382,7 +448,9 @@ def test_settings_prompts(client, db_path):
     post(client, f"/settings/prompts/{slept.id}/move", {"delta": "-1"})
     post(client, f"/settings/prompts/{slept.id}/toggle")
     assert [(p.label, p.active) for p in repo.list_prompts("weekly")] == [
-        ("What got in the way?", True), ("Slept 7h+?", False), ("One fix for next week", True)
+        ("What got in the way?", True),
+        ("Slept 7h+?", False),
+        ("One fix for next week", True),
     ]
     post(client, f"/settings/prompts/{slept.id}/delete")
     assert len(repo.list_prompts("weekly")) == 2

@@ -9,8 +9,8 @@ from twy.services import (
     cycle_status,
     default_review_week,
     loggable,
-    parse_answers,
     parse_alert_minutes,
+    parse_answers,
     parse_block_form,
     parse_day_window,
     parse_goal_form,
@@ -50,7 +50,7 @@ def test_snap_start_moves_to_week_start():
 
 
 def test_review_rows_respect_week_range_and_snapshot(repo):
-    cycle, goal, books, run, late = make_plan(repo)
+    cycle, goal, _books, run, _late = make_plan(repo)
     assert [r.title for r in review_rows(repo, cycle, 1)] == ["Run"]
     assert [r.title for r in review_rows(repo, cycle, 10)] == ["Run", "Launch"]
 
@@ -194,7 +194,11 @@ def test_reflection_items_keep_saved_wording_and_add_new_prompts():
 
 
 def test_parse_answers_validates_kinds_and_skips_blanks():
-    prompts = [Prompt(1, "daily", "Notes"), Prompt(2, "daily", "Energy", "rating"), Prompt(3, "daily", "Planned?", "yesno")]
+    prompts = [
+        Prompt(1, "daily", "Notes"),
+        Prompt(2, "daily", "Energy", "rating"),
+        Prompt(3, "daily", "Planned?", "yesno"),
+    ]
     items = reflection_items(prompts, [])
     answers = parse_answers(items, {"p-1": "  ", "p-2": "4", "p-3": "yes"})
     assert [(a.prompt_id, a.value) for a in answers] == [(2, "4"), (3, "yes")]
@@ -215,7 +219,7 @@ def test_parse_prompt_form():
 
 
 def test_today_rows_and_progress(repo):
-    cycle, goal, books, run, late = make_plan(repo)
+    cycle, _goal, _books, run, _late = make_plan(repo)
     tue, wed = MON + timedelta(days=1), MON + timedelta(days=2)
     assert loggable(cycle, tue, wed) and not loggable(cycle, wed + timedelta(days=1), wed)
     assert not loggable(cycle, MON - timedelta(days=1), wed)

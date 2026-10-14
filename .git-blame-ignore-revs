@@ -1,0 +1,5 @@
+# Bulk formatting commits, skipped by GitHub blame and by
+# git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Apply ruff format
+284453be625f60c14272e8356496b4702fee7914

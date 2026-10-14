@@ -154,9 +154,7 @@ def planning_offset(cycle: Cycle, blocks: Iterable[Block]) -> int | None:
     return min(offsets) if offsets else None
 
 
-def feed_weeks(
-    cycles: list[Cycle], planning: Mapping[int, int | None], today: date
-) -> list[tuple[Cycle, int]]:
+def feed_weeks(cycles: list[Cycle], planning: Mapping[int, int | None], today: date) -> list[tuple[Cycle, int]]:
     """The (cycle, week_no) pairs the calendar feed publishes on `today`.
 
     `planning` maps cycle id → planning_offset(...) for that cycle.
