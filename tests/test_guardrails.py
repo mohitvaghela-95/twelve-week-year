@@ -20,7 +20,7 @@ def test_too_many_tactics_and_heavy_weeks():
     tactics = [Tactic(id=i, goal_id=1, title=f"t{i}", times_per_week=2) for i in range(9)]  # 18 items/week
     warnings = plan_warnings(goals(1), tactics, max_weekly_items=15)
     assert any("9 tactics" in w for w in warnings)
-    assert any("Heavy weeks (> 15 items)" in w for w in warnings)
+    assert any("Heavy weeks (> 15 actions)" in w for w in warnings)
 
 
 def test_daily_habits_are_not_heavy_by_default():

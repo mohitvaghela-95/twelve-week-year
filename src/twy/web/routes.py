@@ -179,6 +179,13 @@ def move_delta() -> int:
     return -1 if request.form.get("delta") == "-1" else 1
 
 
+def moved(cycle: Cycle, anchor: str):
+    """After a reorder: JSON for the Plan page's in-place move, else back to the row."""
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(ok=True)
+    return to_plan(cycle, anchor)
+
+
 @bp.app_context_processor
 def nav_context() -> dict:
     """The cycle the tab bar links to: the one on screen, else the current one."""
@@ -252,7 +259,10 @@ def new_cycle():
         except KeyError:
             copy_from = None
     week_start = r.week_start
-    default_start = align_to_week_start(today(), week_start)
+    next_week = align_to_week_start(today() + timedelta(days=1), week_start)
+    this_week = next_week - timedelta(days=7)
+    # Early in the week, starting now loses little; from Thursday on, a fresh start next week is better.
+    default_start = this_week if (today() - this_week).days <= 2 else next_week
     form = {"name": f"Cycle from {default_start:%d %b %Y}", "start": default_start.isoformat(), "copy": True}
     error = None
     if request.method == "POST":
@@ -273,7 +283,10 @@ def new_cycle():
         copy_name=copy_name,
         week_start=week_start,
         week_start_name=WEEKDAY_NAMES[week_start],
-        tab="home",
+        this_week=this_week,
+        next_week=next_week,
+        first_run=not r.list_cycles(),
+        tab="cycles",
     ), 422 if error else 200
 
 
@@ -292,7 +305,7 @@ def cycles():
                 "goals_hit": f"{hit}/{len(goals)}" if goals and c.status in ("review", "closed") else None,
             }
         )
-    return render_template("cycles.html", rows=rows, tab="cycles")
+    return render_template("cycles.html", rows=rows, can_create=r.current_cycle() is None, tab="cycles")
 
 
 # -- dashboard and trend ----------------------------------------------------------
@@ -363,6 +376,7 @@ def trend(cycle_id: int):
         average=cycle_average(scores.values()),
         reviewed_count=len(scores),
         weeks=weeks,
+        reviewable=set(reviewable_weeks(cycle, today())) if cycle.status != "closed" else set(),
         tab="trend",
     )
 
@@ -455,7 +469,7 @@ def goal_move(cycle_id: int, goal_id: int):
     cycle = writable_cycle(cycle_id)
     goal = load_goal(cycle, goal_id)
     repo().move_goal(goal.id, move_delta())
-    return to_plan(cycle, f"goal-{goal.id}")
+    return moved(cycle, f"goal-{goal.id}")
 
 
 def _tactic_page(cycle: Cycle, goal: Goal, tactic: Tactic):
@@ -518,7 +532,7 @@ def tactic_move(cycle_id: int, tactic_id: int):
     cycle = writable_cycle(cycle_id)
     tactic, _goal = load_tactic(cycle, tactic_id)
     repo().move_tactic(tactic.id, move_delta())
-    return to_plan(cycle, f"tactic-{tactic.id}")
+    return moved(cycle, f"tactic-{tactic.id}")
 
 
 @bp.post("/c/<int:cycle_id>/schedule/check")
@@ -605,7 +619,7 @@ def block_move(cycle_id: int, block_id: int):
     cycle = writable_cycle(cycle_id)
     block = load_block(cycle, block_id)
     repo().move_block(block.id, move_delta())
-    return to_plan(cycle, f"block-{block.id}")
+    return moved(cycle, f"block-{block.id}")
 
 
 # -- week schedule ----------------------------------------------------------------
@@ -681,7 +695,9 @@ def load_day(cycle: Cycle, iso: str) -> date:
 def today_default(cycle_id: int):
     cycle = load_cycle(cycle_id)
     if not loggable(cycle, today(), today()):
-        return render_template("today.html", cycle=cycle, day=None, tab="today")
+        return render_template(
+            "today.html", cycle=cycle, day=None, pos=current_week(cycle.start_date, today()), tab="today"
+        )
     return redirect(url_for(".day_page", cycle_id=cycle.id, iso=today().isoformat()))
 
 
@@ -803,6 +819,11 @@ def review(cycle_id: int, week_no: int):
                 row.done = entry.done
         else:
             score = save_week(r, cycle, week_no, entries, answers, progress)
+            pending = pending_weeks(r, cycle, today())
+            if pending:
+                # Catching up: go straight on to the next week still to score.
+                flash(f"Week {week_no} saved: {format_score(score)}. Now week {pending[0]}.")
+                return redirect(url_for(".review", cycle_id=cycle.id, week_no=pending[0]))
             flash(f"Week {week_no} saved: {format_score(score)}.")
             return redirect(url_for(".dashboard", cycle_id=cycle.id))
 
@@ -823,6 +844,7 @@ def review(cycle_id: int, week_no: int):
         items=items,
         error=error,
         read_only=read_only,
+        in_progress=current_week(cycle.start_date, today()).week_no,
         tab="review",
     ), 422 if error else 200
 

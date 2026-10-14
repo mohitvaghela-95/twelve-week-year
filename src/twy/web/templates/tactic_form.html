@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_slots.html" import slot_editor with context %}
+{% from "_form.html" import delete_form %}
 {% block title %}{{ "Edit tactic" if tactic.id else "New tactic" }}{% endblock %}
 {% block back %}{{ url_for('web.plan', cycle_id=cycle.id) }}{% endblock %}{% block back_label %}Plan{% endblock %}
 {% block content %}
@@ -14,7 +15,7 @@
     <div><label for="start">From week</label><input id="start" name="start" value="{{ fields.start }}" type="number" min="1" max="{{ EXECUTION_WEEKS }}" inputmode="numeric"></div>
     <div><label for="end">To week</label><input id="end" name="end" value="{{ fields.end }}" type="number" min="1" max="{{ EXECUTION_WEEKS }}" inputmode="numeric"></div>
   </div>
-  <p class="muted small">“Run 3×/week” adds 3 items to each week in its range.</p>
+  <p class="muted small">“Run 3×/week” adds 3 actions to each week in its range.</p>
   {{ slot_editor(slot_rows, "Optional: when you'll do it each week, for the Week page and your calendar. Usually one time per “×/week”.", url_for('web.schedule_check_json', cycle_id=cycle.id), "tactic", tactic.id) }}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <div class="row-buttons">
@@ -22,4 +23,5 @@
     <button class="btn primary">Save tactic</button>
   </div>
 </form>
+{% if tactic.id %}{{ delete_form(url_for('web.tactic_delete', cycle_id=cycle.id, tactic_id=tactic.id), "Delete tactic", "Delete tactic “" ~ tactic.title ~ "”? Its past weekly scores are removed too.") }}{% endif %}
 {% endblock %}

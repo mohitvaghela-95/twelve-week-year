@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import reflection_fields %}
 {% block title %}Review · {{ cycle.name }}{% endblock %}
+{% block body_class %}wide{% endblock %}
 {% block content %}
 {% if week_no is none %}
 <h1>Weekly review</h1>
@@ -8,27 +9,26 @@
 {% else %}
 <nav class="weekpicker" aria-label="Week">
   {% for w in weeks %}
-  <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=w) }}" class="chip{{ ' on' if w == week_no }}{{ ' done' if w in reviewed }}"
-     {% if w == week_no %}aria-current="page"{% endif %}>{{ w }}{% if w in reviewed %}<span aria-label="reviewed">✓</span>{% endif %}</a>
+  <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=w) }}" class="chip{{ ' on' if w == week_no }}{{ ' done' if w in reviewed }}{{ ' now' if w == in_progress }}"
+     {% if w == week_no %}aria-current="page"{% endif %}>{{ w }}{% if w in reviewed %}<span title="Reviewed">✓</span><span class="sr-only"> reviewed</span>{% elif w == in_progress %}<span class="sr-only"> in progress</span>{% endif %}</a>
   {% endfor %}
 </nav>
 <div class="page-head">
   <h1>Week {{ week_no }}</h1>
   <span class="muted">{{ first.strftime("%a %d %b") }} – {{ last.strftime("%a %d %b") }}</span>
 </div>
-{% if existing %}<p class="muted small">Reviewed {{ existing.reviewed_at.strftime("%d %b %H:%M") }} UTC. Saving again updates it.</p>{% endif %}
+{% if existing %}<p class="muted small">Reviewed {{ (existing.reviewed_at|localtime).strftime("%a %d %b %H:%M") }}. Saving again updates it.</p>{% endif %}
 {% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
+{% if week_no == in_progress and not read_only %}<div class="banner info">This week is still in progress. You can score it now and update it later.</div>{% endif %}
+{% if error %}<p class="banner error" role="alert">{{ error }}</p>{% endif %}
 
 <form method="post" class="stack" data-guard>
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <fieldset class="plain" {{ 'disabled' if read_only }}>
-  <div class="scorepill band-{{ score|band }}" data-live-score>
-    <span>Score <strong data-value>{{ score|score }}</strong></span><span class="muted small">target 85%</span>
-  </div>
-
+  <div class="split">
   <section class="card">
     <h2>Scorecard</h2>
-    <p class="muted small">How many times did you do each tactic? {% if not existing %}Counts start from what you logged on Today.{% endif %}</p>
+    <p class="muted small">How many times did you do each tactic? {% if not existing %}Counts start from what you logged on Today. {% endif %}Each count is capped at what you planned.</p>
     {% for r in rows %}
     {% if r.tactic_id is none %}
     <div class="score-row" data-planned="{{ r.planned }}">
@@ -41,12 +41,12 @@
     {% else %}
     <div class="score-row" data-planned="{{ r.planned }}">
       <label class="tactic" for="done-{{ r.tactic_id }}"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}
-        {% if r.logged != r.done %}<span class="muted small logged">{{ r.logged }} logged on Today</span>{% endif %}</label>
+        {% if r.logged != r.done %}<span class="muted small logged">{{ r.logged }} logged on Today{{ " (capped at plan)" if r.logged > r.planned }}</span>{% endif %}</label>
       <div class="stepper">
-        <button type="button" data-step="-1" aria-label="One less">−</button>
+        <button type="button" data-step="-1" aria-label="One less: {{ r.title }}">−</button>
         <input id="done-{{ r.tactic_id }}" name="done-{{ r.tactic_id }}" type="number" value="{{ r.done }}" min="0" max="{{ r.planned }}" inputmode="numeric">
         <span class="of">/ {{ r.planned }}</span>
-        <button type="button" data-step="1" aria-label="One more">+</button>
+        <button type="button" data-step="1" aria-label="One more: {{ r.title }}">+</button>
       </div>
     </div>
     {% endif %}
@@ -55,10 +55,11 @@
     {% endfor %}
   </section>
 
+  <div>
   {% if lag_goals %}
   <section class="card">
     <h2>Lag measures</h2>
-    <p class="muted small">Optional: where each goal stands now.</p>
+    <p class="muted small">Optional: where each goal's result stands now (the outcome your tactics drive).</p>
     {% for g in lag_goals %}
     <div class="lag-row">
       <label for="lag-{{ g.id }}">{{ g.title }} <span class="muted small">target {{ g.target|num }}{{ " " ~ g.unit if g.unit }}</span></label>
@@ -75,8 +76,15 @@
     <h2>Reflection</h2>
     {{ reflection_fields(items) }}
   </section>
-  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-  {% if not read_only %}<button class="btn primary block">Save review</button>{% endif %}
+  </div>
+  </div>
+
+  <div class="savebar">
+    <div class="scorepill band-{{ score|band }}" data-live-score>
+      <span>Score <strong data-value>{{ score|score }}</strong></span><span class="muted small">target 85%</span>
+    </div>
+    {% if not read_only %}<button class="btn primary">Save review</button>{% endif %}
+  </div>
   </fieldset>
 </form>
 {% endif %}

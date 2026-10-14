@@ -5,7 +5,7 @@ Run with gunicorn (see the Dockerfile) or `twy-web` for a quick local try.
 
 import os
 import secrets
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, g
@@ -14,6 +14,11 @@ from twy.db import connect, default_db_path
 from twy.domain.scoring import format_score, score_band
 from twy.models import hhmm
 from twy.services import fmt_num
+
+
+def localtime(stamp: datetime) -> datetime:
+    """SQLite's CURRENT_TIMESTAMP is UTC without a zone; show it in the server's time zone (TZ)."""
+    return stamp.replace(tzinfo=UTC).astimezone() if stamp.tzinfo is None else stamp.astimezone()
 
 
 def _secret_key(db_path: Path) -> str:
@@ -55,7 +60,7 @@ def create_app(
     )
     connect(db_path).close()  # create and migrate up front, not on the first request
 
-    app.jinja_env.filters.update(score=format_score, band=score_band, num=fmt_num, hhmm=hhmm)
+    app.jinja_env.filters.update(score=format_score, band=score_band, num=fmt_num, hhmm=hhmm, localtime=localtime)
     app.teardown_appcontext(_close_repo)
 
     from twy.web import auth, routes

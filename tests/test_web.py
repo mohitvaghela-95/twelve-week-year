@@ -85,7 +85,9 @@ def test_full_cycle_flow(client, db_path):
     response = post(client, "/setup", {"week_start": "0", "long_term": "Healthy", "three_year": "Fit"})
     assert response.location == "/cycles/new"
     page = client.get("/cycles/new").text
-    assert 'value="2026-10-19"' in page  # defaults to the next Monday
+    # Wednesday is early enough to start this week (Mon 12 Oct); both weeks are one tap away.
+    assert 'value="2026-10-12"' in page and 'data-set-date="2026-10-19"' in page
+    assert 'aria-current="step"' in page and 'class="tabbar"' not in page  # first-run chrome
 
     # Start date snaps forward to the week start; an earlier Monday stays as is.
     response = post(client, "/cycles/new", {"name": "Autumn", "start": "2026-10-05"})
@@ -97,7 +99,7 @@ def test_full_cycle_flow(client, db_path):
 
     # Invalid goal is re-shown with the shared validation message.
     response = post(client, f"{base}/goals/new", {"title": "Lose 5 kg", "baseline": "82"})
-    assert response.status_code == 422 and "Add a target, or clear the baseline." in response.text
+    assert response.status_code == 422 and "Add a target, or clear the starting value." in response.text
 
     post(client, f"{base}/goals/new", {"title": "Lose 5 kg", "unit": "kg", "baseline": "82", "target": "77"})
     goal = repo.list_goals(cycle.id)[0]
@@ -132,7 +134,7 @@ def test_full_cycle_flow(client, db_path):
     assert ">Rain</textarea>" in response.text  # answers survive the error
     response = post(client, f"{base}/review/1", {f"done-{run.id}": "2", f"lag-{goal.id}": "nan"})
     assert response.status_code == 422  # not a 500 from SQLite turning NaN into NULL
-    post(
+    response = post(
         client,
         f"{base}/review/1",
         {
@@ -143,6 +145,7 @@ def test_full_cycle_flow(client, db_path):
             f"p-{fix}": "Gym",
         },
     )
+    assert response.location == base  # nothing else to score
     assert repo.weekly_scores(cycle.id) == {1: 0.75}  # (2 + 1 clamped) / 4
     assert repo.latest_progress(goal.id) == 80.5
     dashboard = client.get(base).text
@@ -255,7 +258,7 @@ def test_heavy_week_limit_setting(client, db_path):
     )
     assert repo.max_weekly_items == 4
     page = client.get(f"/c/{cycle.id}/plan").text
-    assert "Heavy weeks (&gt; 4 items)" in page and "load-cell heavy" in page
+    assert "Heavy weeks (&gt; 4 actions)" in page and "load-cell heavy" in page
 
 
 def test_schedule_week_page_and_calendar_feed(client, db_path):
@@ -478,6 +481,9 @@ def test_settings_prompts(client, db_path):
 def test_navigation_highlights_and_back_links(client, db_path):
     login(client)
     post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    # No cycle yet: no tabs that would only loop back home.
+    home = client.get("/").text
+    assert "No active cycle" in home and ">Today</span>" not in home and "Week schedule" not in client.get("/more").text
     post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
     plan = client.get("/c/1/plan").text
     assert 'href="/c/1/plan" class=" on" aria-current="page"' in plan
@@ -488,3 +494,36 @@ def test_navigation_highlights_and_back_links(client, db_path):
     assert 'class="back mobile-only" href="/more">‹ More</a>' in settings
     goal_form = client.get("/c/1/goals/new").text
     assert 'class="back" href="/c/1/plan">‹ Plan</a>' in goal_form
+
+
+def test_review_catch_up_and_plan_reorder(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Autumn", date(2026, 9, 28), 0)  # weeks 1 and 2 are finished
+    repo.set_cycle_status(cycle.id, "active")
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=3))
+    lift = repo.save_tactic(Tactic(None, goal.id, "Lift", times_per_week=2))
+    base = f"/c/{cycle.id}"
+
+    # Saving a week goes straight on to the next one still to score, then home.
+    response = post(client, f"{base}/review/1", {f"done-{run.id}": "3", f"done-{lift.id}": "2"})
+    assert response.location == f"{base}/review/2"
+    page = client.get(f"{base}/review/2").text
+    assert 'class="chip now"' in page and "One more: Run" in page
+    assert post(client, f"{base}/review/2", {f"done-{run.id}": "3"}).location == base
+
+    # Reordering answers JSON for the in-place move, and redirects without JavaScript.
+    response = post(client, f"{base}/tactics/{lift.id}/move", {"delta": "-1"}, headers={"Accept": "application/json"})
+    assert response.json == {"ok": True}
+    assert [t.title for t in repo.list_tactics(cycle.id)] == ["Lift", "Run"]
+    assert post(client, f"{base}/tactics/{lift.id}/move", {"delta": "1"}).location == f"{base}/plan#tactic-{lift.id}"
+
+    # Rows open their edit page; delete lives there.
+    plan = client.get(f"{base}/plan").text
+    assert f'class="row-link" href="{base}/tactics/{run.id}/edit"' in plan and "Delete tactic" not in plan
+    assert f'action="{base}/tactics/{run.id}/delete"' in client.get(f"{base}/tactics/{run.id}/edit").text
+
+    # A new cycle can't be started while this one runs, so Cycles doesn't offer it.
+    assert "+ New" not in client.get("/cycles").text

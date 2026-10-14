@@ -5,6 +5,13 @@
 {{ url_for('web.tactic_edit', cycle_id=cycle.id, tactic_id=s.owner_id) if s.owner == "tactic" else url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}
 {%- endmacro %}
 {% macro session_tag(s) -%}{{ "a" if not read_only else "div" }}{%- endmacro %}
+{#- With JavaScript, tapping a session shows its details first (#session-pop); the link to edit is the fallback. -#}
+{% macro session_attrs(s) -%}
+{% if not read_only %} href="{{ edit_url(s) }}" data-session data-title="{{ s.title }}"
+  data-when="{{ s.day.strftime('%A') }} {{ s.start_min|hhmm }}–{{ s.end_min|hhmm }}"
+  data-what="{{ s.context or kinds.get(s.kind, 'Tactic') }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
+  data-edit-label="Edit {{ 'tactic' if s.owner == 'tactic' else 'block' }}"{% endif %}
+{%- endmacro %}
 {% block content %}
 <div class="page-head">
   <h1>Week {{ week_no }}</h1>
@@ -32,7 +39,7 @@
   <p>Nothing scheduled this week.</p>
   <p class="muted small">Add calendar times to your tactics, or create time blocks, on the Plan page.</p>
 </section>
-{% endif %}
+{% else %}
 
 {# Phone: an agenda, one card per day. #}
 <div class="agenda">
@@ -40,7 +47,7 @@
   <section class="card day{{ ' today' if day == today }}">
     <h2>{{ day.strftime("%A") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h2>
     {% for s in items %}
-    <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{% if not read_only %} href="{{ edit_url(s) }}"{% endif %}>
+    <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
       <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
@@ -62,7 +69,7 @@
     <div class="tl-body">
       {% for s in items %}
       {% set lane, count = layout[s.uid] %}
-      <{{ session_tag(s) }} class="tl-item kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{% if not read_only %} href="{{ edit_url(s) }}"{% endif %}
+      <{{ session_tag(s) }} class="tl-item kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}
         title="{{ s.start_min|hhmm }}–{{ s.end_min|hhmm }} {{ s.title }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
         style="top: {{ '%.3f' % ((s.start_min - lo) / span * 100) }}%; height: {{ '%.3f' % (s.duration_min / span * 100) }}%; --lane: {{ lane }}; --lanes: {{ count }}">
         <span class="time">{{ s.start_min|hhmm }}</span> {{ s.title }}
@@ -77,4 +84,6 @@
   <span><span class="kind-dot kind-tactic"></span>Tactic</span>
   {% for key, label in kinds.items() %}<span><span class="kind-dot kind-{{ key }}"></span>{{ label }}</span>{% endfor %}
 </p>
+<div id="session-pop" class="session-pop" popover></div>
+{% endif %}
 {% endblock %}

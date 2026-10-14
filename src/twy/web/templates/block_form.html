@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_slots.html" import slot_editor with context %}
+{% from "_form.html" import delete_form %}
 {% block title %}{{ "Edit block" if block.id else "New block" }}{% endblock %}
 {% block back %}{{ url_for('web.plan', cycle_id=cycle.id) }}{% endblock %}{% block back_label %}Plan{% endblock %}
 {% block content %}
@@ -21,4 +22,5 @@
     <button class="btn primary">Save block</button>
   </div>
 </form>
+{% if block.id %}{{ delete_form(url_for('web.block_delete', cycle_id=cycle.id, block_id=block.id), "Delete block", "Delete block “" ~ block.title ~ "”?") }}{% endif %}
 {% endblock %}

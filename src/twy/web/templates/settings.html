@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_form.html" import post_button %}
+{% from "_form.html" import post_button, delete_form %}
 {% block title %}Settings{% endblock %}
 {% block back %}{{ url_for('web.more') }}{% endblock %}{% block back_label %}More{% endblock %}{% block back_where %}mobile{% endblock %}
 {% block content %}
@@ -11,9 +11,9 @@
     {% for name in weekdays %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == week_start }}>{{ name }}</option>{% endfor %}
   </select>
   <p class="muted small">Applies to new cycles. Existing cycles keep their dates.</p>
-  <label for="max_weekly_items">Max items per week</label>
+  <label for="max_weekly_items">Max actions per week</label>
   <input id="max_weekly_items" name="max_weekly_items" type="number" inputmode="numeric" min="1" max="200" required value="{{ max_weekly_items }}">
-  <p class="muted small">Weeks with more planned items get a “heavy week” warning on the Plan page. A 5×/week tactic counts as 5 items.</p>
+  <p class="muted small">Weeks with more planned actions get a “heavy week” warning on the Plan page. A 5×/week tactic counts as 5.</p>
   <label for="alert_minutes">Calendar alert</label>
   <div class="with-unit"><input id="alert_minutes" name="alert_minutes" type="number" inputmode="numeric" min="0" max="1440" required value="{{ alert_minutes }}"><span class="muted">minutes before (0 = none)</span></div>
   <label for="day_start">Suggest times between</label>
@@ -43,12 +43,12 @@
           </select>
           <button class="btn small">Save</button>
         </form>
+        {{ delete_form(url_for('web.prompt_delete', prompt_id=p.id), "Delete prompt", "Delete “" ~ p.label ~ "”? Past answers to it are kept.") }}
       </details>
       <div class="actions">
         {{ post_button(url_for('web.prompt_move', prompt_id=p.id), "↑", "Move prompt up", delta=-1) }}
         {{ post_button(url_for('web.prompt_move', prompt_id=p.id), "↓", "Move prompt down", delta=1) }}
-        {{ post_button(url_for('web.prompt_toggle', prompt_id=p.id), "◐" if p.active else "○", "Hide prompt" if p.active else "Show prompt") }}
-        {{ post_button(url_for('web.prompt_delete', prompt_id=p.id), "🗑", "Delete prompt", confirm="Delete “" ~ p.label ~ "”? Past answers to it are kept.") }}
+        {{ post_button(url_for('web.prompt_toggle', prompt_id=p.id), "Hide" if p.active else "Show", ("Hide “" if p.active else "Show “") ~ p.label ~ "”", cls="btn small toggle") }}
       </div>
     </li>
     {% else %}

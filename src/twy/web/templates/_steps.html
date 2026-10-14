@@ -1,0 +1,12 @@
+{#- First-run chrome: no tab bar (nothing to navigate to yet), just where you are in setup. -#}
+{% macro onboarding_steps(current) -%}
+<header class="topbar">
+  <span class="brand"><img src="{{ url_for('static', filename='icon.svg') }}" alt=""> 12 Week Year</span>
+</header>
+<ol class="steps" aria-label="Setup">
+  {% for label in ("Basics", "Cycle", "Plan") %}
+  <li class="{{ 'on' if loop.index == current }}{{ ' done' if loop.index < current }}"{% if loop.index == current %} aria-current="step"{% endif %}>
+    <span>{{ loop.index }}</span>{{ label }}</li>
+  {% endfor %}
+</ol>
+{%- endmacro %}

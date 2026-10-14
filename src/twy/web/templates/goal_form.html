@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_form.html" import delete_form %}
 {% block title %}{{ "Edit goal" if goal.id else "New goal" }}{% endblock %}
 {% block back %}{{ url_for('web.plan', cycle_id=cycle.id) }}{% endblock %}{% block back_label %}Plan{% endblock %}
 {% block content %}
@@ -11,9 +12,10 @@
   <input id="why" name="why" value="{{ fields.why }}" placeholder="Link it to your vision">
   <fieldset>
     <legend>Lag measure <span class="muted">(optional)</span></legend>
+    <p class="muted small">The result you're after, measured. Your tactics are the lead actions that move it.</p>
     <div class="grid3">
       <div><label for="unit">Unit</label><input id="unit" name="unit" value="{{ fields.unit }}" placeholder="kg, books…"></div>
-      <div><label for="baseline">Start</label><input id="baseline" name="baseline" value="{{ fields.baseline }}" inputmode="decimal"></div>
+      <div><label for="baseline">Starting value</label><input id="baseline" name="baseline" value="{{ fields.baseline }}" inputmode="decimal"></div>
       <div><label for="target">Target</label><input id="target" name="target" value="{{ fields.target }}" inputmode="decimal"></div>
     </div>
     <p class="muted small">With a target, hit or missed is worked out at Week 13. Lower-is-better works too (82 → 77 kg).</p>
@@ -24,4 +26,5 @@
     <button class="btn primary">Save goal</button>
   </div>
 </form>
+{% if goal.id %}{{ delete_form(url_for('web.goal_delete', cycle_id=cycle.id, goal_id=goal.id), "Delete goal", "Delete goal “" ~ goal.title ~ "” and all its tactics? Their past weekly scores are removed too.") }}{% endif %}
 {% endblock %}

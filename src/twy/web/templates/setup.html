@@ -1,5 +1,8 @@
 {% extends "base.html" %}
+{% from "_steps.html" import onboarding_steps %}
 {% block title %}Welcome{% endblock %}
+{% block body_class %}onboarding{% endblock %}
+{% block chrome %}{{ onboarding_steps(1) }}{% endblock %}
 {% block content %}
 <h1>Welcome</h1>
 <p class="lead">The 12 Week Year treats 12 weeks as your whole year. Pick the day your weeks start, write your vision, then plan your first cycle.</p>

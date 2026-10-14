@@ -5,12 +5,12 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 ## What's in it
 
 - **Home:** what you've logged today (one tap to Today), the current week, your last and average score, a mini trend, and goals with their lag measures.
-- **Plan:** goals and tactics, reordering, soft warnings and items per week, then **Start cycle**.
+- **Plan:** **Start cycle** at the top while you're planning, then goals and tactics (tap one to edit or delete it, ↑/↓ to reorder), soft warnings and actions per week.
 - **Today:** tap + as you finish each tactic, see how the week is going, and write a short daily reflection.
-- **Review:** a −/+ done count per tactic (starting from what you logged on Today), a live score, lag values and your weekly reflection.
+- **Review:** a −/+ done count per tactic (starting from what you logged on Today), lag values and your weekly reflection, with the live score and Save pinned to the bottom. Saving goes straight on to the next week still to score.
 - **Trend:** a 12-week chart with the 85% line, plus weekly notes.
 - **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
-- **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged.
+- **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged. Tap a session for its details and an Edit button.
 - **Cycles, Vision, Settings:** past cycles are read-only. Settings has your reflection prompts, the backup download and the calendar link.
 
 On a phone the tab bar holds Home, Today, Plan, Review and More (Week, Trend, Week 13, Cycles, Vision, Settings). On a wider screen every page is in the sidebar.
@@ -33,11 +33,11 @@ Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this 
 
 ## How scoring works
 
-- A tactic like "Run 3×/week" adds **3 items** to each week in its range.
-- Execution score = items done ÷ items planned. Weeks with nothing planned are skipped.
+- A tactic like "Run 3×/week" adds **3 actions** to each week in its range.
+- Execution score = actions done ÷ actions planned. Weeks with nothing planned are skipped.
 - Each review **snapshots** what was planned, so later tactic edits don't rewrite past weeks. Deleting a tactic does remove it from history.
-- Goals can optionally have a lag measure (unit, baseline, target). The direction is inferred, so 82 → 77 kg means lower is better. Goals without a target are marked hit or missed by hand at Week 13.
-- Soft warnings appear for more than 3 goals, more than ~8 tactics, more items in a week than your limit (Settings, default 25), or a goal with no tactics. They warn but never block.
+- Goals can optionally have a lag measure (unit, starting value, target). The direction is inferred, so 82 → 77 kg means lower is better. Goals without a target are marked hit or missed by hand at Week 13.
+- Soft warnings appear for more than 3 goals, more than ~8 tactics, more actions in a week than your limit (Settings, default 25), or a goal with no tactics. They warn but never block.
 
 ## Running it on your home server
 

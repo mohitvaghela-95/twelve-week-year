@@ -259,7 +259,7 @@ def parse_goal_form(goal: Goal, fields: Mapping[str, str]) -> Goal:
     except ValueError:
         raise FormError("Baseline and target must be numbers.") from None
     if baseline is not None and target is None:
-        raise FormError("Add a target, or clear the baseline.")
+        raise FormError("Add a target, or clear the starting value.")
     return replace(
         goal,
         title=title,
