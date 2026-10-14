@@ -1,7 +1,9 @@
 import sqlite3
 from datetime import date
 
-from twy.db import MIGRATIONS, connect
+import pytest
+
+from twy.db import MIGRATIONS, connect, migrate
 from twy.models import Answer, Block, CycleReview, DayReview, Goal, Prompt, Slot, Tactic, WeekEntry, WeekReview
 
 MON = date(2026, 10, 5)
@@ -69,6 +71,29 @@ def test_week_review_snapshot_and_scores(repo):
     assert repo.latest_progress(goal.id) is None
     assert repo.reviewed_weeks(cycle.id) == {1}
 
+    # A reviewed week with nothing planned has no score.
+    repo.save_week_review(WeekReview(cycle.id, 2))
+    assert repo.weekly_scores(cycle.id) == {1: 1.0, 2: None}
+
+
+def test_deleting_a_tactic_keeps_reviewed_scores(repo):
+    cycle, goal, run, log = make_plan(repo)
+    entries = [WeekEntry(cycle.id, 1, run.id, 3, 0), WeekEntry(cycle.id, 1, log.id, 1, 1)]
+    repo.save_week_review(WeekReview(cycle.id, 1, entries=entries))
+    assert repo.weekly_scores(cycle.id) == {1: 0.25}
+
+    repo.delete_tactic(run.id)
+    assert repo.weekly_scores(cycle.id) == {1: 0.25}
+    kept = repo.get_week_review(cycle.id, 1).entries
+    assert [(e.tactic_id, e.title, e.planned, e.done) for e in kept] == [
+        (None, "Run", 3, 0),
+        (log.id, "Log food", 1, 1),
+    ]
+
+    # Deleting the whole goal keeps the history too; only deleting the cycle removes it.
+    repo.delete_goal(goal.id)
+    assert repo.weekly_scores(cycle.id) == {1: 0.25}
+
 
 def test_close_cycle_and_copy_plan(repo):
     cycle, _goal, _run, _log = make_plan(repo)
@@ -98,8 +123,9 @@ def test_migration_upgrades_a_v1_database(tmp_path):
 def test_slots_blocks_and_copy_plan(repo):
     cycle = repo.create_cycle("Q4", MON, 0)
     goal = repo.save_goal(Goal(id=None, cycle_id=cycle.id, title="AI engineer offer"))
-    study = repo.save_tactic(Tactic(id=None, goal_id=goal.id, title="Study", times_per_week=5))
-    repo.replace_tactic_slots(study.id, [Slot(1, 420, 60), Slot(0, 420, 60)])
+    study = repo.save_tactic(
+        Tactic(id=None, goal_id=goal.id, title="Study", times_per_week=5), [Slot(1, 420, 60), Slot(0, 420, 60)]
+    )
     assert [s.label for s in repo.tactic_slots(cycle.id)[study.id]] == ["Mon 07:00–08:00", "Tue 07:00–08:00"]
 
     block = repo.save_block(Block(id=None, cycle_id=cycle.id, title="Admin", kind="admin", slots=[Slot(4, 960, 30)]))
@@ -149,6 +175,40 @@ def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
         (weekly[1].id, "Gym"),
     ]
     assert [a.label for a in repo.get_week_review(1, 2).answers] == ["One fix for next week"]
+
+
+def test_migration_v4_snapshots_titles_and_unlinks_deleted_tactics(tmp_path):
+    path = tmp_path / "v3.db"
+    old = sqlite3.connect(path)
+    for script in MIGRATIONS[:3]:
+        old.executescript(script)
+    old.execute("PRAGMA user_version = 3")
+    old.executescript(
+        "INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0);"
+        "INSERT INTO goal (id, cycle_id, title) VALUES (1, 1, 'Fit');"
+        "INSERT INTO tactic (id, goal_id, title, times_per_week) VALUES (1, 1, 'Run', 3);"
+        "INSERT INTO week_review (cycle_id, week_no) VALUES (1, 1);"
+        "INSERT INTO week_entry (cycle_id, week_no, tactic_id, planned, done) VALUES (1, 1, 1, 3, 2);"
+    )
+    old.commit()
+    old.close()
+
+    from twy.repo import Repo
+
+    repo = Repo(connect(path))
+    assert [(e.tactic_id, e.title, e.done) for e in repo.get_week_review(1, 1).entries] == [(1, "Run", 2)]
+    repo.delete_tactic(1)
+    assert repo.weekly_scores(1) == {1: 2 / 3}
+
+
+def test_a_failed_migration_leaves_nothing_behind(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    broken = "CREATE TABLE half_done (id INTEGER); INSERT INTO no_such_table VALUES (1);"
+    monkeypatch.setattr("twy.db.MIGRATIONS", [broken])
+    with pytest.raises(sqlite3.OperationalError):
+        migrate(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+    assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'half_done'").fetchone() is None
 
 
 def test_tactic_logs(repo):

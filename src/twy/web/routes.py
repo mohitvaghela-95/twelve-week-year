@@ -461,8 +461,7 @@ def _tactic_page(cycle: Cycle, goal: Goal, tactic: Tactic):
         except FormError as e:
             error = str(e)
         else:
-            saved = repo().save_tactic(updated)
-            repo().replace_tactic_slots(saved.id, slots)
+            saved = repo().save_tactic(updated, slots)
             flash("Tactic saved.")
             return to_plan(cycle, f"tactic-{saved.id}")
     return render_template(
@@ -768,6 +767,8 @@ def review(cycle_id: int, week_no: int):
             abort(403, "This cycle is closed and read-only.")
         done = {}
         for row in rows:
+            if row.tactic_id is None:
+                continue  # deleted tactic: its saved count is kept as is
             try:
                 done[row.tactic_id] = parse_int(request.form.get(f"done-{row.tactic_id}", ""))
             except ValueError:

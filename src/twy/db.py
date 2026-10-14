@@ -152,6 +152,25 @@ MIGRATIONS: list[str] = [
                (SELECT id FROM prompt WHERE scope = 'weekly' AND position = 1), 1, 'One fix for next week', 'text', fix
         FROM week_review WHERE fix != '';
     """,
+    # v4: scorecard entries keep their tactic's title and survive the tactic being deleted,
+    # so editing the plan never rewrites the score of a week already reviewed.
+    """
+    CREATE TABLE week_entry_v4 (
+        id        INTEGER PRIMARY KEY,
+        cycle_id  INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        week_no   INTEGER NOT NULL,
+        tactic_id INTEGER REFERENCES tactic(id) ON DELETE SET NULL,
+        title     TEXT NOT NULL DEFAULT '',
+        planned   INTEGER NOT NULL,
+        done      INTEGER NOT NULL
+    );
+    INSERT INTO week_entry_v4 (cycle_id, week_no, tactic_id, title, planned, done)
+        SELECT e.cycle_id, e.week_no, e.tactic_id, COALESCE(t.title, ''), e.planned, e.done
+        FROM week_entry e LEFT JOIN tactic t ON t.id = e.tactic_id;
+    DROP TABLE week_entry;
+    ALTER TABLE week_entry_v4 RENAME TO week_entry;
+    CREATE UNIQUE INDEX week_entry_tactic ON week_entry (cycle_id, week_no, tactic_id);
+    """,
 ]
 
 
@@ -166,9 +185,14 @@ def default_db_path() -> Path:
 def migrate(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     for i, script in enumerate(MIGRATIONS[version:], start=version + 1):
-        with conn:
-            conn.executescript(script)
-            conn.execute(f"PRAGMA user_version = {i}")
+        # executescript() commits first and then runs in autocommit mode, so `with conn:` can't
+        # make it atomic; the script carries its own transaction, including the version bump.
+        try:
+            conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {i};\nCOMMIT;")
+        except BaseException:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
