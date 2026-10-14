@@ -10,8 +10,10 @@
   {% for w in weeks %}
   <article class="card week {{ 'unreviewed' if not w.reviewed }}">
     <div class="card-head">
-      <h3>Week {{ w.no }} <span class="muted small">{{ w.first.strftime("%d %b") }} – {{ w.last.strftime("%d %b") }}</span></h3>
-      {% if w.reviewed %}<span class="tag band-{{ w.score|band }}">{{ w.score|score }}</span>{% else %}<span class="muted small">not reviewed</span>{% endif %}
+      <h2>Week {{ w.no }} <span class="muted small">{{ w.first.strftime("%d %b") }} – {{ w.last.strftime("%d %b") }}</span></h2>
+      {% if w.reviewed %}<span class="tag band-{{ w.score|band }}">{{ w.score|score }}</span>
+      {% elif w.no in reviewable %}<a class="small" href="{{ url_for('web.review', cycle_id=cycle.id, week_no=w.no) }}">Review ›</a>
+      {% else %}<span class="muted small">not reviewed</span>{% endif %}
     </div>
     {% if w.answers %}{{ answer_list(w.answers) }}{% endif %}
   </article>

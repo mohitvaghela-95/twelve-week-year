@@ -1,5 +1,9 @@
 {% extends "base.html" %}
+{% from "_steps.html" import onboarding_steps %}
 {% block title %}New cycle{% endblock %}
+{% block body_class %}{{ 'onboarding' if first_run }}{% endblock %}
+{% block chrome %}{% if first_run %}{{ onboarding_steps(2) }}{% else %}{{ super() }}{% endif %}{% endblock %}
+{% block back %}{{ url_for('web.cycles') if not first_run }}{% endblock %}{% block back_label %}Cycles{% endblock %}
 {% block content %}
 <h1>New 12-week cycle</h1>
 <form method="post" class="card stack">
@@ -8,12 +12,16 @@
   <label for="name">Name</label>
   <input id="name" name="name" value="{{ form.name }}" required>
   <label for="start">Start date <span class="muted">(moves to the next {{ week_start_name }})</span></label>
+  <div class="quick-add" data-js-only hidden>
+    <button type="button" class="btn small" data-set-date="{{ this_week.isoformat() }}">This week · {{ this_week.strftime("%a %d %b") }}</button>
+    <button type="button" class="btn small" data-set-date="{{ next_week.isoformat() }}">Next week · {{ next_week.strftime("%a %d %b") }}</button>
+  </div>
   <input id="start" name="start" type="date" value="{{ form.start }}" required data-snap data-week-start="{{ week_start }}">
   <p class="muted small" data-snap-preview></p>
   {% if copy_from %}
   <label class="check"><input type="checkbox" name="copy" {{ 'checked' if form.copy }}> Copy goals and tactics from “{{ copy_name }}”</label>
   {% endif %}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-  <button class="btn primary block">Create cycle</button>
+  <button class="btn primary block">{{ "Next: plan your goals" if first_run else "Create cycle" }}</button>
 </form>
 {% endblock %}

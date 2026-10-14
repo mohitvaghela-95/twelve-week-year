@@ -260,6 +260,78 @@
     }
   });
 
+  // Plan: ↑ / ↓ reorder in place. The server swaps positions within the same list, so do the same here.
+  document.addEventListener("submit", async (e) => {
+    const form = e.target.closest("[data-move]");
+    if (!form) return;
+    e.preventDefault();
+    const item = form.closest("[data-item]");
+    const delta = Number(form.querySelector('[name="delta"]').value);
+    let response;
+    try {
+      response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
+    } catch {
+      form.submit(); // offline: let the browser report it
+      return;
+    }
+    if (!response.ok) {
+      form.submit(); // expired form or logged out: post normally to see why
+      return;
+    }
+    const kind = item.dataset.item;
+    let other = delta < 0 ? item.previousElementSibling : item.nextElementSibling;
+    while (other && other.dataset.item !== kind) other = delta < 0 ? other.previousElementSibling : other.nextElementSibling;
+    if (!other) return; // already first or last
+    if (delta < 0) other.before(item);
+    else other.after(item);
+    form.querySelector("button").focus();
+    item.classList.remove("moved");
+    void item.offsetWidth; // restart the highlight
+    item.classList.add("moved");
+  });
+
+  // New cycle: "This week" / "Next week" fill in the start date, and show which one is chosen.
+  const picks = document.querySelectorAll("[data-set-date]");
+  if (picks.length) {
+    const input = picks[0].form.querySelector('[name="start"]');
+    const mark = () => picks.forEach((p) => p.setAttribute("aria-pressed", String(p.dataset.setDate === input.value)));
+    picks.forEach((pick) =>
+      pick.addEventListener("click", () => {
+        input.value = pick.dataset.setDate;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }),
+    );
+    input.addEventListener("input", mark);
+    mark();
+  }
+
+  // Week: tapping a session shows its details, with Edit, instead of jumping straight into the form.
+  const pop = document.getElementById("session-pop");
+  if (pop && "popover" in HTMLElement.prototype) {
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      node.textContent = text;
+      return node;
+    };
+    document.addEventListener("click", (e) => {
+      const session = e.target.closest("[data-session]");
+      if (!session || e.metaKey || e.ctrlKey) return;
+      e.preventDefault();
+      const d = session.dataset;
+      const close = el("button", "btn", "Close");
+      close.type = "button";
+      close.addEventListener("click", () => pop.hidePopover());
+      const edit = el("a", "btn primary", d.editLabel);
+      edit.href = session.getAttribute("href");
+      const buttons = el("div", "row-buttons", "");
+      buttons.append(close, edit);
+      pop.replaceChildren(el("h2", "", d.title), el("p", "", d.when), el("p", "muted small", d.what), buttons);
+      pop.showPopover();
+      edit.focus();
+    });
+  }
+
   // Ratings and yes/no: tap the chosen answer again to clear it.
   document.querySelectorAll("[data-clearable]").forEach((group) => {
     let before = null;

@@ -51,5 +51,5 @@ def plan_warnings(
     heavy = heavy_weeks(tactics, max_weekly_items)
     if heavy:
         weeks = ", ".join(str(w) for w in heavy)
-        warnings.append(f"Heavy weeks (> {max_weekly_items} items): {weeks}.")
+        warnings.append(f"Heavy weeks (> {max_weekly_items} actions): {weeks}.")
     return warnings

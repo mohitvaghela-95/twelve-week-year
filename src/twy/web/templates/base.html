@@ -57,12 +57,14 @@
     <a class="brand desktop-only" href="{{ url_for('web.index') }}"><img src="{{ url_for('static', filename='icon.svg') }}" alt=""> 12 Week Year</a>
     <p class="nav-group desktop-only">This cycle</p>
     {{ nav_item("home", cycle_link('web.dashboard'), "Home") }}
+    {% if nav_cycle_id %}
     {{ nav_item("today", cycle_link('web.today_default'), "Today") }}
     {{ nav_item("plan", cycle_link('web.plan'), "Plan") }}
     {{ nav_item("week", cycle_link('web.week_default'), "Week", "desktop-only") }}
     {{ nav_item("review", cycle_link('web.review_default'), "Review") }}
     {{ nav_item("trend", cycle_link('web.trend'), "Trend", "desktop-only") }}
     {{ nav_item("week13", cycle_link('web.week13'), "Week 13", "desktop-only") }}
+    {% endif %}
     {{ nav_item("more", url_for('web.more'), "More", "mobile-only") }}
     <p class="nav-group desktop-only">Account</p>
     {{ nav_item("cycles", url_for('web.cycles'), "Cycles", "desktop-only") }}

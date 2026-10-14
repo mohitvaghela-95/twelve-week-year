@@ -15,7 +15,14 @@
 <h1>Today</h1>
 <section class="card empty">
   <p>Nothing to track today.</p>
+  {% if cycle.status == "closed" %}
+  <p class="muted small">“{{ cycle.name }}” is closed.</p>
+  {% elif pos.not_started %}
   <p class="muted small">“{{ cycle.name }}” runs {{ cycle.start_date.strftime("%a %d %b") }} for 12 weeks. Daily tracking opens on its first day.</p>
+  {% else %}
+  <p class="muted small">The 12 execution weeks of “{{ cycle.name }}” are over.</p>
+  <a class="btn primary block" href="{{ url_for('web.week13', cycle_id=cycle.id) }}">Do your Week 13 review</a>
+  {% endif %}
 </section>
 {% else %}
 <nav class="weekpicker" aria-label="Day">
