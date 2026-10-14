@@ -84,16 +84,16 @@ ssh -t you@server-ip nano twy/.env
 
 `.github/workflows/ci-cd.yml` builds the Docker image and runs the tests on every pull request. When a PR is merged to `main`, it also deploys: a GitHub runner joins your tailnet, then runs `scripts/deploy.sh` over SSH. Do Option B once by hand first, so the server already has `~/twy/.env` with a password.
 
-On the server (a Mac):
+On the server (the same Linux machine as above):
 
-1. Install [Tailscale](https://tailscale.com/download) and sign in. Turn on **System Settings → General → Sharing → Remote Login**.
-2. Let SSH sessions find Docker. Non-interactive SSH on macOS only has `/usr/bin:/bin:/usr/sbin:/sbin` on its PATH:
+1. Install Tailscale and sign in:
    ```bash
-   echo 'export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"' >> ~/.zshenv
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
    ```
-3. If `~/.docker/config.json` has `"credsStore": "desktop"`, remove that line. Over SSH the keychain is locked, and image pulls fail with `error getting credentials`.
-4. Keep it awake (Docker Desktop must be running while you're logged in): `sudo pmset -a sleep 0 disksleep 0`, and keep it on power if the lid is closed.
-5. Create a deploy key and authorise it:
+2. Make sure the SSH server is running (`sudo apt install openssh-server` on Debian or Ubuntu), and that your user is in the `docker` group. The deploy runs `docker compose` over a non-interactive SSH session, where `sudo` can't prompt.
+3. If the server is a laptop, stop it suspending when the lid is closed. Set `HandleLidSwitch=ignore` and `HandleLidSwitchExternalPower=ignore` in `/etc/systemd/logind.conf`, then run `sudo systemctl restart systemd-logind`.
+4. Create a deploy key and authorise it:
    ```bash
    ssh-keygen -t ed25519 -N '' -C twy-deploy -f ~/twy-deploy
    cat ~/twy-deploy.pub >> ~/.ssh/authorized_keys
@@ -101,17 +101,25 @@ On the server (a Mac):
 
 In the [Tailscale admin console](https://login.tailscale.com/admin):
 
-1. In **Access controls**, add `"tagOwners": {"tag:ci": ["autogroup:admin"]}` and a rule that lets `tag:ci` reach the server on port 22 only.
-2. Under **Settings → OAuth clients**, create a client with write access to **Auth Keys**, tagged `tag:ci`.
+1. In **Access controls**, add `"tagOwners": {"tag:ci": ["autogroup:admin"]}` and save. If the policy isn't the default allow-all, also add a rule that lets `tag:ci` reach the server on `tcp:22`.
+2. Under **Settings → Trust credentials**, create an OAuth credential with the **Auth Keys → Write** scope and the `tag:ci` tag. Save the policy from step 1 first, or the tag can't be picked. If the deploy fails at "Join the tailnet" with `Status: 404, Message: "not found"`, this credential is missing the write scope or the tag.
 
 On GitHub, go to **Settings → Environments → New environment**. Name it `production` and limit its deployment branches to `main`. Add these environment secrets:
 
 | Secret | Value |
 | --- | --- |
-| `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | From the OAuth client |
+| `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | From the trust credential |
 | `DEPLOY_SERVER` | `you@server-name` (its Tailscale MagicDNS name) |
 | `DEPLOY_SSH_KEY` | Contents of `~/twy-deploy` on the server (then delete that file) |
-| `DEPLOY_SSH_KNOWN_HOSTS` | Output of `ssh-keyscan server-name`, run from a machine on the tailnet |
+| `DEPLOY_SSH_KNOWN_HOSTS` | The server's host keys (see below) |
+
+SSH only trusts a host key filed under the exact name it connects to, so record the keys under every name the server goes by. From a machine on the tailnet:
+
+```bash
+{ ssh-keyscan server-name; ssh-keyscan server-name.your-tailnet.ts.net; ssh-keyscan 100.x.y.z; } 2>/dev/null | gh secret set DEPLOY_SSH_KNOWN_HOSTS --env production
+```
+
+The tailnet suffix and address are on the Machines page. If the deploy fails with `Host key verification failed`, this secret is missing the name that `DEPLOY_SERVER` uses.
 
 Because the repository is public, anyone can read the Actions logs. Secrets are masked in them, but keep anything else private out of the logs.
 
