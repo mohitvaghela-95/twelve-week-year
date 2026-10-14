@@ -282,7 +282,7 @@ def cycles():
                 "goals_hit": f"{hit}/{len(goals)}" if goals and c.status in ("review", "closed") else None,
             }
         )
-    return render_template("cycles.html", rows=rows, tab="more")
+    return render_template("cycles.html", rows=rows, tab="cycles")
 
 
 # -- dashboard and trend ----------------------------------------------------------
@@ -883,7 +883,7 @@ def week13(cycle_id: int):
         values=values,
         error=error,
         read_only=read_only,
-        tab="more",
+        tab="week13",
     ), 422 if error else 200
 
 
@@ -899,7 +899,7 @@ def vision():
         flash("Vision saved.")
         return redirect(url_for(".vision"))
     return render_template(
-        "vision.html", long_term=r.get_vision("long_term"), three_year=r.get_vision("three_year"), tab="more"
+        "vision.html", long_term=r.get_vision("long_term"), three_year=r.get_vision("three_year"), tab="vision"
     )
 
 
@@ -943,7 +943,7 @@ def settings():
         db_path=current_app.config["TWY_DB"],
         prompts={scope: r.list_prompts(scope) for scope in PROMPT_SCOPES},
         prompt_kinds=PROMPT_KINDS,
-        tab="more",
+        tab="settings",
     )
 
 

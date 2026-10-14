@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Week 13 · {{ cycle.name }}{% endblock %}
+{% block back %}{{ url_for('web.more') }}{% endblock %}{% block back_label %}More{% endblock %}{% block back_where %}mobile{% endblock %}
 {% block content %}
 <h1>Week 13 review</h1>
 <section class="card hero">
@@ -46,7 +47,7 @@
     <label for="celebration">How will you celebrate?</label>
     <textarea id="celebration" name="celebration" rows="2">{{ values.celebration }}</textarea>
   </section>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if not read_only %}
   <div class="row-buttons">
     <button class="btn primary" name="action" value="save">Save review</button>

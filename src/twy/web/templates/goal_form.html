@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ "Edit goal" if goal.id else "New goal" }}{% endblock %}
+{% block back %}{{ url_for('web.plan', cycle_id=cycle.id) }}{% endblock %}{% block back_label %}Plan{% endblock %}
 {% block content %}
 <h1>{{ "Edit goal" if goal.id else "New goal" }}</h1>
 <form method="post" class="card stack">
@@ -17,7 +18,7 @@
     </div>
     <p class="muted small">With a target, hit or missed is worked out at Week 13. Lower-is-better works too (82 → 77 kg).</p>
   </fieldset>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <div class="row-buttons">
     <a class="btn" href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Cancel</a>
     <button class="btn primary">Save goal</button>

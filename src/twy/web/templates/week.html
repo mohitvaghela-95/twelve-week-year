@@ -13,7 +13,7 @@
 <p class="muted">{{ cycle.name }}{{ " · review week" if week_no == 13 }}</p>
 
 <nav class="weekpicker" aria-label="Week">
-  {% for w in range(1, 14) %}<a class="chip{{ ' on' if w == week_no }}" href="{{ url_for('web.week', cycle_id=cycle.id, week_no=w) }}">{{ w }}</a>{% endfor %}
+  {% for w in range(1, 14) %}<a class="chip{{ ' on' if w == week_no }}"{% if w == week_no %} aria-current="page"{% endif %} href="{{ url_for('web.week', cycle_id=cycle.id, week_no=w) }}">{{ w }}</a>{% endfor %}
 </nav>
 
 <p class="week-summary">

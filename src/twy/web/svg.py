@@ -8,7 +8,7 @@ from twy.domain.scoring import TARGET_SCORE, format_score, score_band
 
 def score_chart_svg(scores: dict[int, float | None], compact: bool = False) -> Markup:
     width, height = 360, 150 if compact else 200
-    left, right, top, bottom = 36, 30, 14, 20
+    left, right, top, bottom = 36, 36, 14, 20
     plot_w, plot_h = width - left - right, height - top - bottom
     slot = plot_w / EXECUTION_WEEKS
     bar_w = slot * 0.64

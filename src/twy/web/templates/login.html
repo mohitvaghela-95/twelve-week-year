@@ -8,8 +8,8 @@
   <h1>12 Week Year</h1>
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <label for="password">Password</label>
-  <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <input id="password" name="password" type="password" autocomplete="current-password" autofocus required{% if error %} aria-invalid="true" aria-describedby="password-error"{% endif %}>
+  {% if error %}<p class="error" role="alert" id="password-error">{{ error }}</p>{% endif %}
   <button class="btn primary block">Log in</button>
   <p class="muted small">You'll stay logged in on this device for 30 days.</p>
 </form>

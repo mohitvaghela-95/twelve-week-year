@@ -23,6 +23,23 @@
   // Controls that only make sense with JavaScript.
   document.querySelectorAll("[data-js-only]").forEach((el) => (el.hidden = false));
 
+  // Saved / warning messages float as toasts (see .js .toasts) and fade out. Re-adding them after load
+  // makes screen readers announce them, since the role="status" region was already in the page.
+  const toasts = document.querySelector("[data-toasts]");
+  if (toasts) {
+    const items = [...toasts.children];
+    toasts.replaceChildren();
+    setTimeout(() => toasts.append(...items), 50);
+    items.forEach((item) => {
+      const hide = () => {
+        item.classList.add("leaving");
+        setTimeout(() => item.remove(), 300);
+      };
+      item.addEventListener("click", hide);
+      setTimeout(hide, item.classList.contains("flash-warn") ? 7000 : 4000);
+    });
+  }
+
   // Calendar time slots: add a row (next day, same time and length) or remove one.
   document.addEventListener("click", (e) => {
     const add = e.target.closest("[data-add-slot]");

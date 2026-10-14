@@ -13,7 +13,7 @@
   {% if copy_from %}
   <label class="check"><input type="checkbox" name="copy" {{ 'checked' if form.copy }}> Copy goals and tactics from “{{ copy_name }}”</label>
   {% endif %}
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <button class="btn primary block">Create cycle</button>
 </form>
 {% endblock %}
