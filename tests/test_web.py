@@ -64,6 +64,15 @@ def test_login_and_csrf(client):
     assert client.get("/settings").status_code == 302
 
 
+def test_login_locks_out_after_repeated_wrong_passwords(client):
+    for _ in range(5):
+        assert post(client, "/login", {"password": "nope"}).status_code == 401
+    response = post(client, "/login", {"password": "secret"})  # right password, but locked out for now
+    assert response.status_code == 429 and "Too many wrong passwords" in response.text
+    other = post(client, "/login", {"password": "secret"}, environ_base={"REMOTE_ADDR": "10.0.0.9"})
+    assert other.status_code == 302  # only the guessing address is locked
+
+
 def test_login_ignores_offsite_next(client):
     response = post(client, "/login?next=//evil.example/", {"password": "secret"})
     assert response.location == "/"
@@ -121,6 +130,8 @@ def test_full_cycle_flow(client, db_path):
     )
     assert response.status_code == 422 and "Lag measures must be numbers." in response.text
     assert ">Rain</textarea>" in response.text  # answers survive the error
+    response = post(client, f"{base}/review/1", {f"done-{run.id}": "2", f"lag-{goal.id}": "nan"})
+    assert response.status_code == 422  # not a 500 from SQLite turning NaN into NULL
     post(
         client,
         f"{base}/review/1",

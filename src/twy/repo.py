@@ -6,7 +6,6 @@ from datetime import date, datetime
 
 from twy.domain.conflicts import DEFAULT_DAY_WINDOW
 from twy.domain.guardrails import DEFAULT_MAX_WEEKLY_ITEMS
-from twy.domain.scoring import execution_score
 from twy.models import (
     Answer,
     Block,
@@ -274,7 +273,8 @@ class Repo:
             raise KeyError(tactic_id)
         return _tactic(row)
 
-    def save_tactic(self, tactic: Tactic) -> Tactic:
+    def save_tactic(self, tactic: Tactic, slots: list[Slot] | None = None) -> Tactic:
+        """Insert or update a tactic and, if `slots` is given, replace its slots, in one transaction."""
         fields = (tactic.title, tactic.times_per_week, tactic.start_week, tactic.end_week)
         with self.conn:
             if tactic.id is None:
@@ -292,6 +292,9 @@ class Repo:
                     "UPDATE tactic SET title = ?, times_per_week = ?, start_week = ?, end_week = ? WHERE id = ?",
                     (*fields, tactic.id),
                 )
+            if slots is not None:
+                self.conn.execute("DELETE FROM slot WHERE tactic_id = ?", (tactic.id,))
+                self._insert_slots("tactic_id", tactic.id, slots)
         return tactic
 
     def delete_tactic(self, tactic_id: int) -> None:
@@ -405,9 +408,9 @@ class Repo:
         if row is None:
             return None
         entries = [
-            WeekEntry(r["cycle_id"], r["week_no"], r["tactic_id"], r["planned"], r["done"])
+            WeekEntry(r["cycle_id"], r["week_no"], r["tactic_id"], r["planned"], r["done"], r["title"])
             for r in self.conn.execute(
-                "SELECT * FROM week_entry WHERE cycle_id = ? AND week_no = ?", (cycle_id, week_no)
+                "SELECT * FROM week_entry WHERE cycle_id = ? AND week_no = ? ORDER BY id", (cycle_id, week_no)
             )
         ]
         return WeekReview(
@@ -430,15 +433,25 @@ class Repo:
         """Write the scorecard, reflection answers and lag readings in one transaction.
 
         Entries are a snapshot of what was planned, replacing any earlier snapshot for this week.
+        A blank entry title is filled in from the tactic, so the line still reads well once it's deleted.
         """
         with self.conn:
             self.conn.execute(
                 "DELETE FROM week_entry WHERE cycle_id = ? AND week_no = ?", (review.cycle_id, review.week_no)
             )
             self.conn.executemany(
-                "INSERT INTO week_entry (cycle_id, week_no, tactic_id, planned, done) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO week_entry (cycle_id, week_no, tactic_id, title, planned, done) "
+                "VALUES (?, ?, ?, COALESCE(NULLIF(?, ''), (SELECT title FROM tactic WHERE id = ?), ''), ?, ?)",
                 [
-                    (review.cycle_id, review.week_no, e.tactic_id, e.planned, max(0, min(e.done, e.planned)))
+                    (
+                        review.cycle_id,
+                        review.week_no,
+                        e.tactic_id,
+                        e.title,
+                        e.tactic_id,
+                        e.planned,
+                        max(0, min(e.done, e.planned)),
+                    )
                     for e in review.entries
                 ],
             )
@@ -461,12 +474,14 @@ class Repo:
                     )
 
     def weekly_scores(self, cycle_id: int) -> dict[int, float | None]:
-        """Execution score for each reviewed week."""
-        scores: dict[int, float | None] = {}
-        for week_no in sorted(self.reviewed_weeks(cycle_id)):
-            review = self.get_week_review(cycle_id, week_no)
-            scores[week_no] = execution_score(review.entries) if review else None
-        return scores
+        """Execution score for each reviewed week, in one query (same rule as scoring.execution_score)."""
+        rows = self.conn.execute(
+            "SELECT r.week_no, SUM(e.planned) AS planned, SUM(MAX(0, MIN(e.done, e.planned))) AS done "
+            "FROM week_review r LEFT JOIN week_entry e ON e.cycle_id = r.cycle_id AND e.week_no = r.week_no "
+            "WHERE r.cycle_id = ? GROUP BY r.week_no ORDER BY r.week_no",
+            (cycle_id,),
+        )
+        return {r["week_no"]: r["done"] / r["planned"] if r["planned"] else None for r in rows}
 
     def goal_progress(self, goal_id: int) -> dict[int, float]:
         rows = self.conn.execute(
@@ -481,16 +496,17 @@ class Repo:
     # -- daily tactic logs ------------------------------------------------------
 
     def log_tactic(self, tactic_id: int, day: date, delta: int) -> int:
-        """Add `delta` to a tactic's count for a day (never below 0). Returns the new count."""
+        """Add `delta` to a tactic's count for a day (never below 0). Returns the new count.
+
+        One upsert does the read and the write, so two quick taps on different threads both count.
+        """
         with self.conn:
-            count = max(0, self.logged_on(tactic_id, day) + delta)
-            if count:
-                self.conn.execute(
-                    "INSERT INTO tactic_log (tactic_id, day, count) VALUES (?, ?, ?) "
-                    "ON CONFLICT(tactic_id, day) DO UPDATE SET count = excluded.count",
-                    (tactic_id, day.isoformat(), count),
-                )
-            else:
+            count = self.conn.execute(
+                "INSERT INTO tactic_log (tactic_id, day, count) VALUES (?, ?, MAX(0, ?)) "
+                "ON CONFLICT(tactic_id, day) DO UPDATE SET count = MAX(0, count + ?) RETURNING count",
+                (tactic_id, day.isoformat(), delta, delta),
+            ).fetchone()["count"]
+            if not count:
                 self.conn.execute(
                     "DELETE FROM tactic_log WHERE tactic_id = ? AND day = ?", (tactic_id, day.isoformat())
                 )

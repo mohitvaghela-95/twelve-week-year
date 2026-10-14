@@ -98,11 +98,14 @@ class Block:
 
 @dataclass
 class WeekEntry:
+    """One tactic's line on a reviewed week's scorecard: a snapshot that outlives the tactic."""
+
     cycle_id: int
     week_no: int
-    tactic_id: int
+    tactic_id: int | None  # None once the tactic has been deleted
     planned: int
     done: int
+    title: str = ""  # the tactic's title when the week was reviewed
 
 
 PROMPT_KINDS = {"text": "Text", "rating": "Rating 1–5", "yesno": "Yes / no"}

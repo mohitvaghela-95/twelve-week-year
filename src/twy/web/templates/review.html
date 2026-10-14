@@ -30,6 +30,15 @@
     <h2>Scorecard</h2>
     <p class="muted small">How many times did you do each tactic? {% if not existing %}Counts start from what you logged on Today.{% endif %}</p>
     {% for r in rows %}
+    {% if r.tactic_id is none %}
+    <div class="score-row" data-planned="{{ r.planned }}">
+      <span class="tactic"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}</span>
+      <div class="stepper">
+        <input type="number" value="{{ r.done }}" disabled aria-label="Done (kept from the saved review)">
+        <span class="of">/ {{ r.planned }}</span>
+      </div>
+    </div>
+    {% else %}
     <div class="score-row" data-planned="{{ r.planned }}">
       <label class="tactic" for="done-{{ r.tactic_id }}"><span class="muted small">{{ r.goal_title }}</span>{{ r.title }}
         {% if r.logged != r.done %}<span class="muted small logged">{{ r.logged }} logged on Today</span>{% endif %}</label>
@@ -40,6 +49,7 @@
         <button type="button" data-step="1" aria-label="One more">+</button>
       </div>
     </div>
+    {% endif %}
     {% else %}
     <p class="muted">No tactics planned for this week.</p>
     {% endfor %}

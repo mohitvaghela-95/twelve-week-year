@@ -145,13 +145,21 @@
     const form = e.target.closest("[data-log]");
     if (!form) return;
     e.preventDefault();
+    let response;
+    try {
+      response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
+    } catch {
+      // The tap may have reached the server before the connection dropped, so re-posting
+      // could count it twice. Reload to show the true count instead.
+      window.location.reload();
+      return;
+    }
     let data;
     try {
-      const response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
       if (!response.ok) throw new Error(response.statusText);
       data = await response.json();
     } catch {
-      form.submit(); // fall back to a normal post and reload
+      form.submit(); // refused (expired form, logged out): nothing was saved, so post normally to see why
       return;
     }
     const row = form.closest(".log-row");

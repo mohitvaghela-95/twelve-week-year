@@ -2,6 +2,7 @@
 the Week 13 flow. No Flask imports here, so they stay easy to test.
 """
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
@@ -57,8 +58,14 @@ class FormError(ValueError):
 
 
 def parse_float(text: str) -> float | None:
+    """A number, or None for blank. "nan" and "inf" are rejected: SQLite would store NaN as NULL."""
     text = text.strip()
-    return float(text) if text else None
+    if not text:
+        return None
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(text)
+    return value
 
 
 def parse_int(text: str, default: int = 0) -> int:
@@ -352,7 +359,7 @@ def schedule_check(
 
 @dataclass
 class ReviewRow:
-    tactic_id: int
+    tactic_id: int | None  # None: a tactic deleted after the week was reviewed (shown read-only)
     goal_title: str
     title: str
     planned: int
@@ -385,19 +392,23 @@ def prefill_done(planned: int, logged: int, snapshot: WeekEntry | None) -> int:
     `logged` is the total from the Today page's daily logs for that week (it can exceed
     `planned`). `snapshot` is the entry saved by an earlier review of the week, if any.
     """
-    # TODO(human): decide how daily logs pre-fill the weekly scorecard.
-    return snapshot.done if snapshot else 0
+    # A saved review is a deliberate score (it may correct the logs), so it wins; logs added
+    # afterwards still show as "N logged on Today" beside the row.
+    if snapshot is not None:
+        return snapshot.done
+    return min(logged, planned)
 
 
 def review_rows(repo: Repo, cycle: Cycle, week_no: int, existing: WeekReview | None = None) -> list[ReviewRow]:
     """Tactics to score for a week, with done counts pre-filled by `prefill_done`.
 
-    A reviewed week shows its snapshot (tactics added later are left out); an
-    unreviewed week shows the tactics active in it now.
+    A reviewed week shows its snapshot (tactics added later are left out, deleted ones
+    come last and can't be changed); an unreviewed week shows the tactics active in it now.
     """
     if existing is None:
         existing = repo.get_week_review(cycle.id, week_no)
-    snapshot = {e.tactic_id: e for e in existing.entries} if existing else {}
+    entries = existing.entries if existing else []
+    snapshot = {e.tactic_id: e for e in entries if e.tactic_id is not None}
     logged = repo.logged_between(cycle.id, *week_range(cycle.start_date, week_no))
     goals = {g.id: g for g in repo.list_goals(cycle.id)}
     rows = []
@@ -413,13 +424,21 @@ def review_rows(repo: Repo, cycle: Cycle, week_no: int, existing: WeekReview | N
         rows.append(
             ReviewRow(t.id, goals[t.goal_id].title, t.title, planned, prefill_done(planned, count, entry), count)
         )
+    rows += [ReviewRow(None, "Deleted tactic", e.title, e.planned, e.done) for e in entries if e.tactic_id is None]
     return rows
 
 
 def week_entries(cycle_id: int, week_no: int, rows: list[ReviewRow], done: Mapping[int, int]) -> list[WeekEntry]:
-    """Scorecard entries with done clamped to 0..planned."""
+    """Scorecard entries with done clamped to 0..planned. Deleted tactics keep their saved count."""
     return [
-        WeekEntry(cycle_id, week_no, r.tactic_id, r.planned, max(0, min(done.get(r.tactic_id, 0), r.planned)))
+        WeekEntry(
+            cycle_id,
+            week_no,
+            r.tactic_id,
+            r.planned,
+            max(0, min(r.done if r.tactic_id is None else done.get(r.tactic_id, 0), r.planned)),
+            r.title,
+        )
         for r in rows
     ]
 

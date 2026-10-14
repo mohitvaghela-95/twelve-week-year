@@ -13,6 +13,7 @@ from twy.services import (
     parse_answers,
     parse_block_form,
     parse_day_window,
+    parse_float,
     parse_goal_form,
     parse_max_weekly_items,
     parse_prompt_form,
@@ -64,6 +65,30 @@ def test_review_rows_respect_week_range_and_snapshot(repo):
     assert [(r.title, r.planned, r.done) for r in rows] == [("Run", 3, 3)]  # done clamped to planned
 
 
+def test_today_logs_prefill_the_scorecard_until_the_week_is_reviewed(repo):
+    cycle, _goal, _books, run, _late = make_plan(repo)  # Run: 3x/week
+    for offset in range(5):
+        repo.log_tactic(run.id, MON + timedelta(days=offset), 1)
+    rows = review_rows(repo, cycle, 1)
+    assert [(r.done, r.logged) for r in rows] == [(3, 5)]  # capped at the plan
+
+    save_week(repo, cycle, 1, week_entries(cycle.id, 1, rows, {run.id: 1}), [], {})
+    assert [(r.done, r.logged) for r in review_rows(repo, cycle, 1)] == [(1, 5)]  # the saved score wins
+
+
+def test_resaving_a_week_keeps_deleted_tactics(repo):
+    cycle, goal, _books, run, _late = make_plan(repo)
+    walk = repo.save_tactic(Tactic(id=None, goal_id=goal.id, title="Walk"))
+    save_week(repo, cycle, 1, week_entries(cycle.id, 1, review_rows(repo, cycle, 1), {run.id: 1, walk.id: 1}), [], {})
+    repo.delete_tactic(run.id)
+
+    rows = review_rows(repo, cycle, 1)
+    assert [(r.tactic_id, r.title, r.done) for r in rows] == [(walk.id, "Walk", 1), (None, "Run", 1)]
+    # The posted form has no field for the deleted row; its saved count must survive a re-save.
+    save_week(repo, cycle, 1, week_entries(cycle.id, 1, rows, {walk.id: 0}), [], {})
+    assert repo.weekly_scores(cycle.id) == {1: 1 / 4}
+
+
 def test_default_review_week_and_status(repo):
     cycle, *_ = make_plan(repo)
     repo.set_cycle_status(cycle.id, "active")
@@ -87,6 +112,15 @@ def test_parse_goal_form():
         parse_goal_form(blank, {"title": "x", "target": "lots"})
     with pytest.raises(FormError, match="Add a target"):
         parse_goal_form(blank, {"title": "x", "baseline": "3"})
+    with pytest.raises(FormError, match="must be numbers"):
+        parse_goal_form(blank, {"title": "x", "target": "nan"})  # SQLite would store NULL
+
+
+@pytest.mark.parametrize("text", ["nan", "NaN", "inf", "-Infinity"])
+def test_parse_float_rejects_non_finite(text):
+    with pytest.raises(ValueError):
+        parse_float(text)
+    assert parse_float(" 1e3 ") == 1000 and parse_float("") is None
 
 
 def test_parse_tactic_form():
