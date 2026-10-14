@@ -39,7 +39,9 @@ jobs:
       - name: Smoke test the container
         run: |
           docker run -d --name twy -e TWY_PASSWORD=ci -p 8000:8000 twy:ci
-          if ! curl -fsS --retry 15 --retry-delay 1 --retry-connrefused http://127.0.0.1:8000/healthz; then
+          # Until gunicorn listens, Docker's port proxy accepts and then resets connections,
+          # which --retry-connrefused doesn't count as retryable.
+          if ! curl -fsS --retry 15 --retry-delay 1 --retry-all-errors http://127.0.0.1:8000/healthz; then
             docker logs twy
             exit 1
           fi
