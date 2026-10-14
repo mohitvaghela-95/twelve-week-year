@@ -1,7 +1,7 @@
 """Create a demo database with a cycle that is 7 weeks in, 6 weeks reviewed and this week partly logged.
 
-    TWY_DB=/tmp/twy-demo.db uv run python scripts/seed_demo.py
-    TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
+TWY_DB=/tmp/twy-demo.db uv run python scripts/seed_demo.py
+TWY_PASSWORD=demo TWY_DB=/tmp/twy-demo.db uv run twy-web
 """
 
 import random
@@ -43,11 +43,17 @@ def seed(repo: Repo, today: date) -> None:
                 done = max(0, t.times_per_week - rng.choice([0, 0, 0, 1]))
                 entries.append(WeekEntry(cycle.id, week, t.id, t.times_per_week, done))
         value -= rng.uniform(0.2, 0.9)
-        answers = [
-            Answer(obstacles.id, obstacles.label, obstacles.kind, notes[week - 1]),
-            Answer(fix.id, fix.label, fix.kind, "Book runs in calendar"),
-        ] if notes[week - 1] else []
-        repo.save_week_review(WeekReview(cycle.id, week, entries=entries, answers=answers), {weight.id: round(value, 1)})
+        answers = (
+            [
+                Answer(obstacles.id, obstacles.label, obstacles.kind, notes[week - 1]),
+                Answer(fix.id, fix.label, fix.kind, "Book runs in calendar"),
+            ]
+            if notes[week - 1]
+            else []
+        )
+        repo.save_week_review(
+            WeekReview(cycle.id, week, entries=entries, answers=answers), {weight.id: round(value, 1)}
+        )
 
     # This week (7): a few tactics logged on Today, and yesterday's reflection.
     week_first = start + timedelta(weeks=6)
@@ -59,7 +65,11 @@ def seed(repo: Repo, today: date) -> None:
     if today > week_first:
         went_well = repo.list_prompts("daily")[0]
         repo.save_day_review(
-            DayReview(cycle.id, today - timedelta(days=1), answers=[Answer(went_well.id, went_well.label, "text", "Ran before work")])
+            DayReview(
+                cycle.id,
+                today - timedelta(days=1),
+                answers=[Answer(went_well.id, went_well.label, "text", "Ran before work")],
+            )
         )
 
 

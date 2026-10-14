@@ -194,7 +194,11 @@ def test_reflection_items_keep_saved_wording_and_add_new_prompts():
 
 
 def test_parse_answers_validates_kinds_and_skips_blanks():
-    prompts = [Prompt(1, "daily", "Notes"), Prompt(2, "daily", "Energy", "rating"), Prompt(3, "daily", "Planned?", "yesno")]
+    prompts = [
+        Prompt(1, "daily", "Notes"),
+        Prompt(2, "daily", "Energy", "rating"),
+        Prompt(3, "daily", "Planned?", "yesno"),
+    ]
     items = reflection_items(prompts, [])
     answers = parse_answers(items, {"p-1": "  ", "p-2": "4", "p-3": "yes"})
     assert [(a.prompt_id, a.value) for a in answers] == [(2, "4"), (3, "yes")]

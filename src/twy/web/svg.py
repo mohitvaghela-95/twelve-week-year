@@ -41,6 +41,8 @@ def score_chart_svg(scores: dict[int, float | None], compact: bool = False) -> M
 
     target_y = y(TARGET_SCORE)
     parts.append(f'<line class="target" x1="{left}" x2="{width - right}" y1="{target_y:.1f}" y2="{target_y:.1f}"/>')
-    parts.append(f'<text class="target-label" x="{width - right + 4}" y="{target_y + 3.5:.1f}">{TARGET_SCORE:.0%}</text>')
+    parts.append(
+        f'<text class="target-label" x="{width - right + 4}" y="{target_y + 3.5:.1f}">{TARGET_SCORE:.0%}</text>'
+    )
     parts.append("</svg>")
     return Markup("".join(parts))

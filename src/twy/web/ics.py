@@ -44,9 +44,7 @@ def describe(s: Session) -> str:
     return BLOCK_KINDS.get(s.kind, s.kind)
 
 
-def render_calendar(
-    sessions: Iterable[Session], alert_minutes: int, now: datetime, tz: tzinfo | None = None
-) -> str:
+def render_calendar(sessions: Iterable[Session], alert_minutes: int, now: datetime, tz: tzinfo | None = None) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",

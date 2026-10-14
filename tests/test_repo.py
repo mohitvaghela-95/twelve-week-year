@@ -132,7 +132,9 @@ def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
         old.executescript(script)
     old.execute("PRAGMA user_version = 2")
     old.execute("INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0)")
-    old.execute("INSERT INTO week_review (cycle_id, week_no, obstacles, fix) VALUES (1, 1, 'Rain', 'Gym'), (1, 2, '', 'Sleep')")
+    old.execute(
+        "INSERT INTO week_review (cycle_id, week_no, obstacles, fix) VALUES (1, 1, 'Rain', 'Gym'), (1, 2, '', 'Sleep')"
+    )
     old.commit()
     old.close()
 
@@ -142,7 +144,10 @@ def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
     weekly = repo.list_prompts("weekly")
     assert [p.label for p in weekly] == ["What got in the way?", "One fix for next week"]
     assert len(repo.list_prompts("daily")) == 3
-    assert [(a.prompt_id, a.value) for a in repo.get_week_review(1, 1).answers] == [(weekly[0].id, "Rain"), (weekly[1].id, "Gym")]
+    assert [(a.prompt_id, a.value) for a in repo.get_week_review(1, 1).answers] == [
+        (weekly[0].id, "Rain"),
+        (weekly[1].id, "Gym"),
+    ]
     assert [a.label for a in repo.get_week_review(1, 2).answers] == ["One fix for next week"]
 
 
@@ -170,7 +175,9 @@ def test_prompts_and_day_reviews_keep_past_wording(repo):
     repo.save_day_review(DayReview(cycle.id, day, answers=[Answer(energy.id, "Energy", "rating", "4")]))
     repo.save_prompt(Prompt(energy.id, "daily", "Energy level", "rating", active=False))
     assert [p.label for p in repo.list_prompts("daily", active_only=True)] == [
-        "What went well?", "What got in the way?", "Top tactics for tomorrow"
+        "What went well?",
+        "What got in the way?",
+        "Top tactics for tomorrow",
     ]
     repo.delete_prompt(energy.id)
     review = repo.get_day_review(cycle.id, day)

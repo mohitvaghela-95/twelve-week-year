@@ -23,8 +23,16 @@ def cycle(id=1, start=MON, week_start=0, status="active"):
 
 def session(day, start, minutes, slot_id):
     return Session(
-        day=day, start_min=start, duration_min=minutes, title=f"s{slot_id}", kind="tactic",
-        owner="tactic", owner_id=1, slot_id=slot_id, cycle_id=1, week_no=1,
+        day=day,
+        start_min=start,
+        duration_min=minutes,
+        title=f"s{slot_id}",
+        kind="tactic",
+        owner="tactic",
+        owner_id=1,
+        slot_id=slot_id,
+        cycle_id=1,
+        week_no=1,
     )
 
 
@@ -51,7 +59,9 @@ def test_sessions_respect_tactic_ranges_and_week_13():
     assert week1[0].context == "AI engineer offer"
     assert week1[0].uid == "tactic-1-20261005@twy"
     assert {s.title for s in sessions_for_week(c, 10, [study, mocks], slots, {}, [admin])} == {
-        "Study", "Mock interview", "Admin",
+        "Study",
+        "Mock interview",
+        "Admin",
     }
     assert [s.title for s in sessions_for_week(c, 13, [study, mocks], slots, {}, [admin])] == ["Admin"]
 

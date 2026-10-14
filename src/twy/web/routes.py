@@ -332,7 +332,16 @@ def trend(cycle_id: int):
     weeks = []
     for w in range(1, EXECUTION_WEEKS + 1):
         first, last = week_range(cycle.start_date, w)
-        weeks.append({"no": w, "first": first, "last": last, "reviewed": w in scores, "answers": answers.get(w, []), "score": scores.get(w)})
+        weeks.append(
+            {
+                "no": w,
+                "first": first,
+                "last": last,
+                "reviewed": w in scores,
+                "answers": answers.get(w, []),
+                "score": scores.get(w),
+            }
+        )
     return render_template(
         "trend.html",
         cycle=cycle,
@@ -817,7 +826,9 @@ def week13(cycle_id: int):
     }
     for goal in goals:
         if goal.measurable:
-            values[f"final-{goal.id}"] = fmt_num(goal.final_value if goal.final_value is not None else r.latest_progress(goal.id))
+            values[f"final-{goal.id}"] = fmt_num(
+                goal.final_value if goal.final_value is not None else r.latest_progress(goal.id)
+            )
         else:
             values[f"manual-{goal.id}"] = goal.outcome or ""
     error = None

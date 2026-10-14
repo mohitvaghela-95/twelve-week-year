@@ -35,8 +35,10 @@ def plan_warnings(
             warnings.append(f"Goal “{g.title}” has no tactics yet.")
 
     for t in tactics:
-        if t.start_week > t.end_week or not (1 <= t.start_week <= EXECUTION_WEEKS) or not (
-            1 <= t.end_week <= EXECUTION_WEEKS
+        if (
+            t.start_week > t.end_week
+            or not (1 <= t.start_week <= EXECUTION_WEEKS)
+            or not (1 <= t.end_week <= EXECUTION_WEEKS)
         ):
             warnings.append(f"Tactic “{t.title}” has an invalid week range ({t.start_week}–{t.end_week}).")
 

@@ -93,7 +93,7 @@ def parse_alert_minutes(text: str) -> int:
 
 
 def parse_time(text: str) -> int | None:
-    """"HH:MM" (or "HH:MM:SS" from some browsers) → minutes after midnight, else None."""
+    """ "HH:MM" (or "HH:MM:SS" from some browsers) → minutes after midnight, else None."""
     parts = text.strip().split(":")
     if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts) or len(parts[1]) != 2:
         return None
@@ -410,7 +410,9 @@ def review_rows(repo: Repo, cycle: Cycle, week_no: int, existing: WeekReview | N
         else:
             continue
         count = logged.get(t.id, 0)
-        rows.append(ReviewRow(t.id, goals[t.goal_id].title, t.title, planned, prefill_done(planned, count, entry), count))
+        rows.append(
+            ReviewRow(t.id, goals[t.goal_id].title, t.title, planned, prefill_done(planned, count, entry), count)
+        )
     return rows
 
 
@@ -461,7 +463,11 @@ def reflection_items(prompts: list[Prompt], answers: list[Answer]) -> list[Refle
     items = []
     for p in prompts:
         a = saved.pop(p.id, None)
-        items.append(ReflectionItem(f"p-{p.id}", p.id, a.label, a.kind, a.value) if a else ReflectionItem(f"p-{p.id}", p.id, p.label, p.kind))
+        items.append(
+            ReflectionItem(f"p-{p.id}", p.id, a.label, a.kind, a.value)
+            if a
+            else ReflectionItem(f"p-{p.id}", p.id, p.label, p.kind)
+        )
     items += [
         ReflectionItem(f"p-{a.prompt_id}" if a.prompt_id else f"a-{i}", a.prompt_id, a.label, a.kind, a.value)
         for i, a in enumerate(answers)
