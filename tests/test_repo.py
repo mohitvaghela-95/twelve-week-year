@@ -71,7 +71,7 @@ def test_week_review_snapshot_and_scores(repo):
 
 
 def test_close_cycle_and_copy_plan(repo):
-    cycle, goal, run, log = make_plan(repo)
+    cycle, _goal, _run, _log = make_plan(repo)
     repo.save_cycle_review(CycleReview(cycle.id, lessons="Plan less", celebration="Dinner"))
     repo.set_cycle_status(cycle.id, "closed")
     assert repo.current_cycle() is None
@@ -147,7 +147,7 @@ def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
 
 
 def test_tactic_logs(repo):
-    cycle, goal, run, log = make_plan(repo)
+    cycle, _goal, run, log = make_plan(repo)
     tue, wed = date(2026, 10, 6), date(2026, 10, 7)
     assert repo.log_tactic(run.id, tue, 1) == 1
     assert repo.log_tactic(run.id, tue, 1) == 2

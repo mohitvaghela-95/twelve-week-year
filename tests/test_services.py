@@ -9,8 +9,8 @@ from twy.services import (
     cycle_status,
     default_review_week,
     loggable,
-    parse_answers,
     parse_alert_minutes,
+    parse_answers,
     parse_block_form,
     parse_day_window,
     parse_goal_form,
@@ -50,7 +50,7 @@ def test_snap_start_moves_to_week_start():
 
 
 def test_review_rows_respect_week_range_and_snapshot(repo):
-    cycle, goal, books, run, late = make_plan(repo)
+    cycle, goal, _books, run, _late = make_plan(repo)
     assert [r.title for r in review_rows(repo, cycle, 1)] == ["Run"]
     assert [r.title for r in review_rows(repo, cycle, 10)] == ["Run", "Launch"]
 
@@ -215,7 +215,7 @@ def test_parse_prompt_form():
 
 
 def test_today_rows_and_progress(repo):
-    cycle, goal, books, run, late = make_plan(repo)
+    cycle, _goal, _books, run, _late = make_plan(repo)
     tue, wed = MON + timedelta(days=1), MON + timedelta(days=2)
     assert loggable(cycle, tue, wed) and not loggable(cycle, wed + timedelta(days=1), wed)
     assert not loggable(cycle, MON - timedelta(days=1), wed)

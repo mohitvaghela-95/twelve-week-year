@@ -3,7 +3,7 @@
 import hmac
 import tempfile
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -23,11 +23,31 @@ from flask import (
 )
 
 from twy.db import backup_to, connect
-from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, WEEKDAY_NAMES, align_to_week_start, current_week, cycle_end, week_range
+from twy.domain.dates import (
+    EXECUTION_WEEKS,
+    REVIEW_WEEK,
+    WEEKDAY_NAMES,
+    align_to_week_start,
+    current_week,
+    cycle_end,
+    week_range,
+)
 from twy.domain.guardrails import heavy_weeks, plan_warnings
 from twy.domain.schedule import feed_weeks, lanes, overlaps, planning_offset
 from twy.domain.scoring import cycle_average, execution_score, format_score, goal_outcome, planned_items, score_band
-from twy.models import BLOCK_KINDS, PROMPT_KINDS, PROMPT_SCOPES, WEEKDAY_SHORT, Block, Cycle, Goal, Prompt, Slot, Tactic, hhmm
+from twy.models import (
+    BLOCK_KINDS,
+    PROMPT_KINDS,
+    PROMPT_SCOPES,
+    WEEKDAY_SHORT,
+    Block,
+    Cycle,
+    Goal,
+    Prompt,
+    Slot,
+    Tactic,
+    hhmm,
+)
 from twy.repo import Repo
 from twy.services import (
     FormError,
@@ -37,13 +57,13 @@ from twy.services import (
     default_review_week,
     fmt_num,
     loggable,
+    parse_alert_minutes,
     parse_answers,
+    parse_block_form,
     parse_cycle_form,
     parse_day_window,
     parse_float,
     parse_goal_form,
-    parse_alert_minutes,
-    parse_block_form,
     parse_int,
     parse_max_weekly_items,
     parse_prompt_form,
@@ -795,11 +815,11 @@ def week13(cycle_id: int):
         "lessons": cycle_review.lessons if cycle_review else "",
         "celebration": cycle_review.celebration if cycle_review else "",
     }
-    for g in goals:
-        if g.measurable:
-            values[f"final-{g.id}"] = fmt_num(g.final_value if g.final_value is not None else r.latest_progress(g.id))
+    for goal in goals:
+        if goal.measurable:
+            values[f"final-{goal.id}"] = fmt_num(goal.final_value if goal.final_value is not None else r.latest_progress(goal.id))
         else:
-            values[f"manual-{g.id}"] = g.outcome or ""
+            values[f"manual-{goal.id}"] = goal.outcome or ""
     error = None
 
     if request.method == "POST":
@@ -810,8 +830,8 @@ def week13(cycle_id: int):
             save_week13(
                 r,
                 cycle,
-                finals={g.id: values[f"final-{g.id}"] for g in goals if g.measurable},
-                manual={g.id: values[f"manual-{g.id}"] or None for g in goals if not g.measurable},
+                finals={goal.id: values[f"final-{goal.id}"] for goal in goals if goal.measurable},
+                manual={goal.id: values[f"manual-{goal.id}"] or None for goal in goals if not goal.measurable},
                 lessons=values["lessons"],
                 celebration=values["celebration"],
             )
@@ -826,15 +846,15 @@ def week13(cycle_id: int):
             return redirect(url_for(".week13", cycle_id=cycle.id))
 
     goal_rows = []
-    for g in goals:
+    for goal in goals:
         outcome = None
-        if g.measurable:
+        if goal.measurable:
             try:
-                final = parse_float(values[f"final-{g.id}"])
+                final = parse_float(values[f"final-{goal.id}"])
             except ValueError:
                 final = None
-            outcome = goal_outcome(replace(g, final_value=final))
-        goal_rows.append({"goal": g, "outcome": outcome})
+            outcome = goal_outcome(replace(goal, final_value=final))
+        goal_rows.append({"goal": goal, "outcome": outcome})
 
     scores = r.weekly_scores(cycle.id)
     pos = current_week(cycle.start_date, today())
@@ -991,7 +1011,7 @@ def calendar_feed(token: str):
     cycles = [c for c in r.list_cycles() if c.status != "closed"]
     planning = {c.id: planning_offset(c, r.list_blocks(c.id)) for c in cycles}
     sessions = [s for cycle, week_no in feed_weeks(cycles, planning, today()) for s in week_sessions(r, cycle, week_no)]
-    body = render_calendar(sessions, r.alert_minutes, datetime.now(timezone.utc))
+    body = render_calendar(sessions, r.alert_minutes, datetime.now(UTC))
     return Response(body, mimetype="text/calendar", headers={"Cache-Control": "no-cache"})
 
 

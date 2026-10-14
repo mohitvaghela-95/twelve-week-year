@@ -6,17 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
 
-from twy.domain.dates import (
-    EXECUTION_WEEKS,
-    WEEKDAY_NAMES,
-    CyclePosition,
-    align_to_week_start,
-    current_week,
-    cycle_end,
-    last_finished_week,
-    week_range,
-)
-from twy.domain.scoring import execution_score, goal_outcome
 from twy.domain.conflicts import (
     PairWarning,
     Placed,
@@ -27,7 +16,18 @@ from twy.domain.conflicts import (
     placed_for_cycle,
     weeks_label,
 )
+from twy.domain.dates import (
+    EXECUTION_WEEKS,
+    WEEKDAY_NAMES,
+    CyclePosition,
+    align_to_week_start,
+    current_week,
+    cycle_end,
+    last_finished_week,
+    week_range,
+)
 from twy.domain.schedule import Session, sessions_for_week
+from twy.domain.scoring import execution_score, goal_outcome
 from twy.models import (
     BLOCK_KINDS,
     PROMPT_KINDS,

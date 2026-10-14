@@ -5,7 +5,7 @@ time zone (TZ), so DST is handled per date and no VTIMEZONE block is needed.
 """
 
 from collections.abc import Iterable
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 
 from twy.domain.dates import EXECUTION_WEEKS
 from twy.domain.schedule import Session
@@ -35,7 +35,7 @@ def fold(line: str) -> str:
 
 def utc_stamp(local: datetime, tz: tzinfo | None) -> str:
     aware = local.replace(tzinfo=tz) if tz else local.astimezone()  # None: the server's local zone
-    return aware.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return aware.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def describe(s: Session) -> str:
@@ -57,7 +57,7 @@ def render_calendar(
         "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
         "X-PUBLISHED-TTL:PT1H",
     ]
-    stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = now.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     for s in sessions:
         lines += [
             "BEGIN:VEVENT",

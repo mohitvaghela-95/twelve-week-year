@@ -1,11 +1,11 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from twy.domain.schedule import Session
 from twy.web.ics import fold, render_calendar
 
 LONDON = ZoneInfo("Europe/London")
-NOW = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 
 
 def session(day, title="Study", start=420, minutes=60):
