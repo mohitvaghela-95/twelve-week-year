@@ -158,35 +158,106 @@
   }
 
   // Today: log a tactic without reloading the page (the form still works without JavaScript).
-  document.addEventListener("submit", async (e) => {
+  // The count changes on tap; requests for a row go one at a time, and the server's answer
+  // is the truth once the row has nothing left in flight. A failed tap is undone in place
+  // with a Retry, so the page never reloads and typed reflection text is never lost.
+  const setRow = (row, today, week) => {
+    row.querySelector("[data-today]").textContent = today;
+    row.querySelector("[data-week]").textContent = week;
+    row.classList.toggle("zero", today === 0);
+    row.classList.toggle("met", week >= Number(row.dataset.planned));
+  };
+  const updateProgress = () => {
+    const pill = document.querySelector("[data-week-progress]");
+    let planned = 0;
+    let done = 0;
+    document.querySelectorAll(".log-row").forEach((row) => {
+      const p = Number(row.dataset.planned);
+      planned += p;
+      done += Math.min(Number(row.querySelector("[data-week]").textContent), p);
+    });
+    const score = planned ? done / planned : null;
+    pill.querySelector("[data-value]").textContent = score === null ? "—" : `${Math.round(score * 100)}%`;
+    setBand(pill, score);
+  };
+  const showLogError = (row, text, retry) => {
+    row.querySelector(".log-error")?.remove();
+    const note = document.createElement("p");
+    note.className = "log-error";
+    note.setAttribute("role", "alert");
+    note.textContent = `${text} `;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = retry ? "Retry" : "Reload";
+    button.addEventListener("click", () => {
+      note.remove();
+      if (retry) retry();
+      else window.location.reload();
+    });
+    note.append(button);
+    row.querySelector(".tactic").append(note);
+  };
+  const rowQueue = new WeakMap();
+  document.addEventListener("submit", (e) => {
     const form = e.target.closest("[data-log]");
     if (!form) return;
     e.preventDefault();
-    let response;
-    try {
-      response = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } });
-    } catch {
-      // The tap may have reached the server before the connection dropped, so re-posting
-      // could count it twice. Reload to show the true count instead.
-      window.location.reload();
-      return;
-    }
-    let data;
-    try {
-      if (!response.ok) throw new Error(response.statusText);
-      data = await response.json();
-    } catch {
-      form.submit(); // refused (expired form, logged out): nothing was saved, so post normally to see why
-      return;
-    }
     const row = form.closest(".log-row");
-    row.querySelector("[data-today]").textContent = data.today;
-    row.querySelector("[data-week]").textContent = data.week;
-    row.classList.toggle("met", data.week >= Number(row.dataset.planned));
-    const pill = document.querySelector("[data-week-progress]");
-    pill.querySelector("[data-value]").textContent = data.progress;
-    pill.classList.remove("band-good", "band-warn", "band-bad", "band-none");
-    pill.classList.add(`band-${data.band}`);
+    const delta = Number(form.querySelector('[name="delta"]').value);
+    const today = Number(row.querySelector("[data-today]").textContent);
+    if (today + delta < 0) return;
+    setRow(row, today + delta, Number(row.querySelector("[data-week]").textContent) + delta);
+    updateProgress();
+    row.querySelector(".log-error")?.remove();
+    row.dataset.inFlight = Number(row.dataset.inFlight || 0) + 1;
+    const body = new FormData(form);
+    const send = async () => {
+      let response;
+      try {
+        response = await fetch(form.action, { method: "POST", body, headers: { Accept: "application/json" } });
+      } catch {
+        return { failed: "Couldn't save: no connection." };
+      }
+      try {
+        if (!response.ok) throw new Error(response.statusText);
+        return { data: await response.json() };
+      } catch {
+        // Expired form or logged out: nothing was saved, and a reload shows why.
+        return { failed: "Couldn't save.", reload: true };
+      }
+    };
+    const run = (rowQueue.get(row) || Promise.resolve()).then(send).then((result) => {
+      const left = Number(row.dataset.inFlight) - 1;
+      row.dataset.inFlight = left;
+      if (result.data) {
+        if (left === 0) setRow(row, result.data.today, result.data.week);
+      } else {
+        // Undo this tap. If it did reach the server, the next successful tap corrects the count.
+        const t = Number(row.querySelector("[data-today]").textContent);
+        const w = Number(row.querySelector("[data-week]").textContent);
+        setRow(row, Math.max(0, t - delta), Math.max(0, w - delta));
+        showLogError(row, result.failed, result.reload ? null : () => form.requestSubmit());
+      }
+      updateProgress();
+    });
+    rowQueue.set(row, run);
+  });
+
+  // Warn before leaving a page with typed-but-unsaved reflection, review or vision text.
+  const guarded = [...document.querySelectorAll("form[data-guard]")].map((form) => ({
+    form,
+    saved: new URLSearchParams(new FormData(form)).toString(),
+  }));
+  let submitting = false;
+  document.addEventListener("submit", (e) => {
+    if (!e.defaultPrevented && e.target.matches("form[data-guard]")) submitting = true;
+  });
+  window.addEventListener("beforeunload", (e) => {
+    if (submitting) return;
+    if (guarded.some(({ form, saved }) => new URLSearchParams(new FormData(form)).toString() !== saved)) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
   });
 
   // Ratings and yes/no: tap the chosen answer again to clear it.

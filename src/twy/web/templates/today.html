@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import reflection_fields %}
+{% block body_class %}wide{% endblock %}
 {% block title %}{{ "Today" if day is none or day == today else day.strftime("%a %d %b") }} · {{ cycle.name }}{% endblock %}
 {% macro log_button(t, delta) -%}
 <form method="post" action="{{ url_for('web.day_log', cycle_id=cycle.id, iso=day.isoformat()) }}" class="inline" data-log>
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <input type="hidden" name="tactic_id" value="{{ t.tactic_id }}">
   <input type="hidden" name="delta" value="{{ delta }}">
-  <button aria-label="{{ 'One more' if delta > 0 else 'One less' }}: {{ t.title }}">{{ "+" if delta > 0 else "−" }}</button>
+  <button data-delta="{{ delta }}" aria-label="{{ 'One more' if delta > 0 else 'One less' }}: {{ t.title }}">{{ "+" if delta > 0 else "−" }}</button>
 </form>
 {%- endmacro %}
 {% block content %}
@@ -32,34 +33,24 @@
   <h1>{{ "Today" if day == today else day.strftime("%A") }}</h1>
   <span class="tag">{{ day.day }} {{ day.strftime("%b") }}</span>
 </div>
-<p class="muted">{{ cycle.name }} · week {{ week_no }} · <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=week_no) }}">Weekly review ›</a></p>
+<p class="muted">{{ cycle.name }} · week {{ week_no }}
+  {%- if review_week and review_week in pending %} · <a href="{{ url_for('web.review', cycle_id=cycle.id, week_no=review_week) }}">Review week {{ review_week }} ›</a>{% endif %}</p>
 {% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
 
 <div class="scorepill band-{{ progress|band }}" data-week-progress>
   <span>Week so far <strong data-value>{{ progress|score }}</strong></span><span class="muted small">target 85%</span>
 </div>
 
-{% if sessions %}
-<section class="card">
-  <h2>Scheduled</h2>
-  {% for s in sessions %}
-  <{{ "a" if s.owner == "tactic" else "div" }} class="session kind-{{ s.kind }}"{% if s.owner == "tactic" %} href="#t-{{ s.owner_id }}"{% endif %}>
-    <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
-    <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}</span></span>
-  </{{ "a" if s.owner == "tactic" else "div" }}>
-  {% endfor %}
-</section>
-{% endif %}
-
+<div class="split">
 <section class="card">
   <h2>Tactics</h2>
   <p class="muted small">Tap + each time you do one. These counts fill in your weekly review.</p>
   {% for t in rows %}
-  <div class="score-row log-row{{ ' met' if t.week >= t.planned }}" id="t-{{ t.tactic_id }}" data-planned="{{ t.planned }}">
+  <div class="score-row log-row{{ ' met' if t.week >= t.planned }}{{ ' zero' if not t.today }}" id="t-{{ t.tactic_id }}" data-planned="{{ t.planned }}">
     <div class="tactic">
       <span class="muted small">{{ t.goal_title }}</span>
-      {{ t.title }}
-      <span class="muted small week-count"><span data-week>{{ t.week }}</span> / {{ t.planned }} this week</span>
+      <span>{{ t.title }}<span class="done-mark" title="Done {{ 'today' if day == today else 'this day' }}"> ✓</span></span>
+      <span class="muted small week-count"><span data-week>{{ t.week }}</span> / {{ t.planned }} this week<span class="met-mark"> · target met</span></span>
     </div>
     <div class="stepper">
       {% if not read_only %}{{ log_button(t, -1) }}{% endif %}
@@ -72,7 +63,20 @@
   {% endfor %}
 </section>
 
-<form method="post" class="card stack" id="reflection">
+<div>
+{% if sessions %}
+<section class="card">
+  <div class="card-head"><h2>Scheduled</h2><a href="{{ url_for('web.week', cycle_id=cycle.id, week_no=week_no) }}">Week ›</a></div>
+  {% for s in sessions %}
+  <{{ "a" if s.owner == "tactic" else "div" }} class="session kind-{{ s.kind }}"{% if s.owner == "tactic" %} href="#t-{{ s.owner_id }}"{% endif %}>
+    <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
+    <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}</span></span>
+  </{{ "a" if s.owner == "tactic" else "div" }}>
+  {% endfor %}
+</section>
+{% endif %}
+
+<form method="post" class="card stack" id="reflection" data-guard>
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <div class="card-head">
     <h2>Daily reflection</h2>
@@ -84,5 +88,7 @@
     {% if not read_only and items %}<button class="btn primary block">Save reflection</button>{% endif %}
   </fieldset>
 </form>
+</div>
+</div>
 {% endif %}
 {% endblock %}

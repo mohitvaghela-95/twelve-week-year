@@ -13,7 +13,7 @@
 </section>
 {% if read_only %}<div class="banner info">This cycle is closed and read-only.</div>{% endif %}
 
-<form method="post" class="stack">
+<form method="post" class="stack" data-guard>
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">
   <fieldset class="plain" {{ 'disabled' if read_only }}>
   <section class="card">

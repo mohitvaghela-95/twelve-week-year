@@ -13,6 +13,10 @@
   --warn: #c2410c;
   --bad: #c92a2a;
   --none: #adb5bd;
+  /* Bars and other fills only need 3:1, so they keep the brighter shades. */
+  --good-fill: #2f9e44;
+  --warn-fill: #f76707;
+  --bad-fill: #e03131;
   --good-bg: #ebfbee;
   --warn-bg: #fff4e6;
   --bad-bg: #fff5f5;
@@ -39,6 +43,9 @@
     --warn: #ffa94d;
     --bad: #ff6b6b;
     --none: #5c6672;
+    --good-fill: #51cf66;
+    --warn-fill: #ffa94d;
+    --bad-fill: #ff6b6b;
     --good-bg: #13291a;
     --warn-bg: #2e2111;
     --bad-bg: #321617;
@@ -271,10 +278,10 @@ legend { font-weight: 600; font-size: 0.92rem; padding: 0 4px; }
 .tag.bad { background: var(--bad-bg); color: var(--bad); }
 
 /* score bands */
-.band-good { --band: var(--good); --band-bg: var(--good-bg); }
-.band-warn { --band: var(--warn); --band-bg: var(--warn-bg); }
-.band-bad { --band: var(--bad); --band-bg: var(--bad-bg); }
-.band-none { --band: var(--muted); --band-bg: var(--surface-2); }
+.band-good { --band: var(--good); --band-bg: var(--good-bg); --band-fill: var(--good-fill); }
+.band-warn { --band: var(--warn); --band-bg: var(--warn-bg); --band-fill: var(--warn-fill); }
+.band-bad { --band: var(--bad); --band-bg: var(--bad-bg); --band-fill: var(--bad-fill); }
+.band-none { --band: var(--muted); --band-bg: var(--surface-2); --band-fill: var(--none); }
 .tag[class*="band-"] { background: var(--band-bg); color: var(--band); }
 .text-good { color: var(--good); }
 .text-warn { color: var(--warn); }
@@ -294,7 +301,7 @@ legend { font-weight: 600; font-size: 0.92rem; padding: 0 4px; }
   border-radius: var(--radius);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 5px solid var(--band, var(--border));
+  border-left: 5px solid var(--band-fill, var(--border));
   box-shadow: var(--shadow);
 }
 .stat .label { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
@@ -306,7 +313,7 @@ legend { font-weight: 600; font-size: 0.92rem; padding: 0 4px; }
 .chart { width: 100%; height: auto; display: block; margin: 4px 0; }
 .chart .grid { stroke: var(--border); stroke-width: 1; }
 .chart .axis { fill: var(--muted); font-size: 12px; }
-.chart .bar { fill: var(--band); }
+.chart .bar { fill: var(--band-fill); }
 .chart .slot { fill: var(--border); }
 .chart .target { stroke: var(--bad); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart .target-label { fill: var(--bad); font-size: 12px; font-weight: 700; }
@@ -394,6 +401,14 @@ legend { font-weight: 600; font-size: 0.92rem; padding: 0 4px; }
 [data-week-progress] { margin-bottom: 12px; }
 .stepper output { min-width: 2.4em; text-align: center; font-weight: 800; font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .log-row.met .week-count { color: var(--good); font-weight: 600; }
+.log-row.zero [data-delta="-1"] { visibility: hidden; }
+.done-mark, .met-mark { display: none; }
+.log-row:not(.zero) .done-mark { display: inline; color: var(--good); }
+.log-row.met .met-mark { display: inline; }
+.log-error { margin: 4px 0 0; color: var(--bad); font-size: 0.85rem; }
+.log-error button { min-height: 32px; padding: 0 4px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.today-card p { margin: 4px 0 0; }
+.today-card .btn.block { margin-bottom: 0; }
 .logged { font-weight: 400; }
 .reflect-item + .reflect-item { margin-top: 12px; }
 .reflect-item textarea { margin-bottom: 0; }
@@ -577,4 +592,6 @@ a.session:hover { text-decoration: none; background: color-mix(in srgb, var(--ki
   .page { padding: 24px 16px; }
   .load { grid-template-columns: repeat(12, 1fr); }
   .btn.block { width: auto; display: inline-flex; min-width: 220px; }
+  .scorepill { top: 16px; }
+  .split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 0 16px; align-items: start; }
 }

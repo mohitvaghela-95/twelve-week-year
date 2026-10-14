@@ -13,8 +13,20 @@
 <div class="banner info">Week 12 is done. <a href="{{ url_for('web.week13', cycle_id=cycle.id) }}">Do your Week 13 review</a></div>
 {% endif %}
 
+{% if today_rows is not none %}
+{% set logged = today_rows|selectattr("today")|list|length %}
+<section class="card today-card">
+  <div class="card-head">
+    <h2>Today</h2>
+    <span class="tag band-{{ week_progress|band }}">Week so far {{ week_progress|score }}</span>
+  </div>
+  <p>{% if logged %}<strong>{{ logged }} of {{ today_rows|length }}</strong> tactics logged today.{% elif today_rows %}Nothing logged yet today.{% else %}No tactics this week.{% endif %}</p>
+  <a class="btn primary block" href="{{ url_for('web.today_default', cycle_id=cycle.id) }}">Log today ›</a>
+</section>
+{% endif %}
+
 <section class="card hero">
-  <p class="eyebrow">{{ cycle.status }}</p>
+  <p class="eyebrow">{{ STATUS_LABELS[cycle.status] }}</p>
   <h1>{{ cycle.name }}</h1>
   <p class="where">{{ status.where }}</p>
   <p class="muted small">{{ cycle.start_date.strftime("%d %b %Y") }} → {{ end.strftime("%d %b %Y") }}</p>
@@ -27,9 +39,9 @@
     <span class="muted small">target 85%</span>
   </div>
   <div class="stat band-{{ average|band }}">
-    <span class="label">Average ({{ reviewed_count }} wk)</span>
+    <span class="label">Average</span>
     <span class="value">{{ average|score }}</span>
-    <span class="muted small">target 85%</span>
+    <span class="muted small">over {{ reviewed_count }} week{{ "s" if reviewed_count != 1 }}</span>
   </div>
 </div>
 
@@ -53,7 +65,4 @@
   <p class="muted">No goals yet. <a href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Plan your cycle</a>.</p>
   {% endfor %}
 </section>
-{% if cycle.status != "closed" and status.pending %}
-<a class="btn primary block" href="{{ review_url }}">Score week {{ status.pending[0] }}</a>
-{% endif %}
 {% endblock %}
