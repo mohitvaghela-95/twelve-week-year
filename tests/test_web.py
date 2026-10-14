@@ -427,7 +427,13 @@ def test_today_logging_and_daily_reflection(client, db_path):
     post(client, f"{base}/day/2026-10-13/log", {"tactic_id": str(run.id), "delta": "-1"})
     assert repo.logged_between(cycle.id, date(2026, 10, 12), date(2026, 10, 18)) == {run.id: 1}
     assert post(client, f"{base}/day/2026-10-14/log", {"tactic_id": "999"}).status_code == 404
-    assert "<span data-week>1</span> / 3 this week" in client.get(f"{base}/day/2026-10-14").text
+    page = client.get(f"{base}/day/2026-10-14").text
+    assert "<span data-week>1</span> / 3 this week" in page
+    # The review link points at the oldest week still to score, not the week in progress.
+    assert f'href="{base}/review/1">Review week 1 ›</a>' in page
+    # Home leads with today's logging.
+    home = client.get(base).text
+    assert "<strong>1 of 1</strong> tactics logged today." in home and "Log today ›" in home
 
     # Daily reflection with a rating prompt added in Settings.
     post(client, "/settings/prompts", {"scope": "daily", "label": "Energy", "kind": "rating"})

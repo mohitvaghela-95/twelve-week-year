@@ -4,7 +4,7 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 
 ## What's in it
 
-- **Home:** the current week, your last and average score, a mini trend, and goals with their lag measures.
+- **Home:** what you've logged today (one tap to Today), the current week, your last and average score, a mini trend, and goals with their lag measures.
 - **Plan:** goals and tactics, reordering, soft warnings and items per week, then **Start cycle**.
 - **Today:** tap + as you finish each tactic, see how the week is going, and write a short daily reflection.
 - **Review:** a −/+ done count per tactic (starting from what you logged on Today), a live score, lag values and your weekly reflection.
@@ -13,9 +13,11 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 - **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged.
 - **Cycles, Vision, Settings:** past cycles are read-only. Settings has your reflection prompts, the backup download and the calendar link.
 
+On a phone the tab bar holds Home, Today, Plan, Review and More (Week, Trend, Week 13, Cycles, Vision, Settings). On a wider screen every page is in the sidebar.
+
 ## Daily tracking and reflections
 
-**Today** lists every tactic in this week's plan with a −/+ count for the day and a running “3 / 5 this week” total. Today's calendar sessions are shown above. Use the day chips to catch up on an earlier day this week. Future days and Week 13 can't be logged.
+**Today** lists every tactic in this week's plan with a −/+ count for the day and a running “3 / 5 this week” total. Today's calendar sessions are listed below the tactics (beside them on a wide screen). Taps save instantly; if one fails, the count goes back and a Retry appears. Use the day chips to catch up on an earlier day this week. Future days and Week 13 can't be logged.
 
 When you open a week's review, each tactic's done count starts from that week's daily logs, and you can still change it before saving. Once saved, the review is the record that the score uses. A tactic whose logs differ from its saved count shows “N logged on Today”.
 

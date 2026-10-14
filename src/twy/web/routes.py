@@ -69,6 +69,7 @@ from twy.services import (
     parse_prompt_form,
     parse_slots,
     parse_tactic_form,
+    pending_weeks,
     plan_clashes,
     previous_cycle_id,
     reflection_items,
@@ -170,6 +171,10 @@ def to_plan(cycle: Cycle, anchor: str | None = None):
     return redirect(url_for(".plan", cycle_id=cycle.id, _anchor=anchor))
 
 
+# Cycle statuses as people read them (the stored ones are short identifiers).
+STATUS_LABELS = {"planning": "Planning", "active": "In progress", "review": "Week 13 review", "closed": "Closed"}
+
+
 def move_delta() -> int:
     return -1 if request.form.get("delta") == "-1" else 1
 
@@ -181,7 +186,12 @@ def nav_context() -> dict:
     if cycle_id is None and request.endpoint not in ("auth.login", "web.healthz", "static"):
         current = repo().current_cycle()
         cycle_id = current.id if current else None
-    return {"nav_cycle_id": cycle_id, "EXECUTION_WEEKS": EXECUTION_WEEKS, "WEEKDAY_SHORT": WEEKDAY_SHORT}
+    return {
+        "nav_cycle_id": cycle_id,
+        "EXECUTION_WEEKS": EXECUTION_WEEKS,
+        "WEEKDAY_SHORT": WEEKDAY_SHORT,
+        "STATUS_LABELS": STATUS_LABELS,
+    }
 
 
 @bp.app_errorhandler(400)
@@ -307,6 +317,8 @@ def dashboard(cycle_id: int):
             }
         )
     current = r.current_cycle()
+    # The daily action comes first on Home: how much of today's plan is logged.
+    today_rows_ = today_rows(r, cycle, today()) if loggable(cycle, today(), today()) else None
     return render_template(
         "dashboard.html",
         cycle=cycle,
@@ -319,6 +331,8 @@ def dashboard(cycle_id: int):
         chart=score_chart_svg(scores, compact=True),
         goals=goals,
         current=current if current and current.id != cycle.id else None,
+        today_rows=today_rows_,
+        week_progress=week_progress(today_rows_) if today_rows_ else None,
         tab="home",
     )
 
@@ -713,6 +727,8 @@ def day_page(cycle_id: int, iso: str):
         items=items,
         error=error,
         read_only=read_only,
+        review_week=default_review_week(r, cycle, today()),
+        pending=pending_weeks(r, cycle, today()),
         tab="today",
     ), 422 if error else 200
 
