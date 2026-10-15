@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from twy.db import MIGRATIONS, connect, migrate
+from twy.db import DEFAULT_PROMPTS, MIGRATIONS, connect, migrate
 from twy.models import (
     Answer,
     Block,
@@ -243,20 +243,17 @@ def test_migration_v3_moves_weekly_notes_into_answers(tmp_path):
     old.execute(
         "INSERT INTO week_review (cycle_id, week_no, obstacles, fix) VALUES (1, 1, 'Rain', 'Gym'), (1, 2, '', 'Sleep')"
     )
-    old.commit()
-    old.close()
-
-    from twy.repo import Repo
-
-    repo = Repo(connect(path))
-    weekly = repo.list_prompts("weekly")
-    assert [p.label for p in weekly] == ["What got in the way?", "One fix for next week"]
-    assert len(repo.list_prompts("daily")) == 3
-    assert [(a.prompt_id, a.value) for a in repo.get_week_review(1, 1).answers] == [
-        (weekly[0].id, "Rain"),
-        (weekly[1].id, "Gym"),
+    old.executescript(MIGRATIONS[2])  # v3 alone: later versions replace these default prompts
+    weekly = old.execute("SELECT id, label FROM prompt WHERE scope = 'weekly' ORDER BY position").fetchall()
+    assert [label for _, label in weekly] == ["What got in the way?", "One fix for next week"]
+    assert old.execute("SELECT COUNT(*) FROM prompt WHERE scope = 'daily'").fetchone()[0] == 3
+    answers = old.execute("SELECT period, prompt_id, label, value FROM answer ORDER BY period, position").fetchall()
+    assert answers == [
+        ("1", weekly[0][0], "What got in the way?", "Rain"),
+        ("1", weekly[1][0], "One fix for next week", "Gym"),
+        ("2", weekly[1][0], "One fix for next week", "Sleep"),
     ]
-    assert [a.label for a in repo.get_week_review(1, 2).answers] == ["One fix for next week"]
+    old.close()
 
 
 def test_migration_v4_snapshots_titles_and_unlinks_deleted_tactics(tmp_path):
@@ -281,6 +278,49 @@ def test_migration_v4_snapshots_titles_and_unlinks_deleted_tactics(tmp_path):
     assert [(e.tactic_id, e.title, e.done) for e in repo.get_week_review(1, 1).entries] == [(1, "Run", 2)]
     repo.delete_tactic(1)
     assert repo.weekly_scores(1) == {1: 2 / 3}
+
+
+def test_a_new_database_starts_with_the_default_prompts(repo):
+    prompts = [(p.scope, p.label, p.kind) for scope in ("daily", "weekly") for p in repo.list_prompts(scope)]
+    assert prompts == DEFAULT_PROMPTS
+
+
+def test_migration_v6_swaps_untouched_default_prompts(tmp_path):
+    path = tmp_path / "v5.db"
+    old = sqlite3.connect(path)
+    for script in MIGRATIONS[:5]:
+        old.executescript(script)
+    old.execute("PRAGMA user_version = 5")
+    old.executescript(
+        "INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0);"
+        "INSERT INTO week_review (cycle_id, week_no) VALUES (1, 1);"
+        "UPDATE prompt SET label = 'What went really well?' WHERE label = 'What went well?';"  # edited: kept
+        "UPDATE prompt SET active = 0 WHERE label = 'Top tactics for tomorrow';"  # hidden but untouched: goes
+        "INSERT INTO prompt (scope, position, label, kind) VALUES ('daily', 3, 'Energy', 'rating');"
+        "INSERT INTO prompt (scope, position, label, kind) VALUES ('weekly', 2, 'What will I do differently next week?', 'text');"
+        "INSERT INTO answer (cycle_id, scope, period, prompt_id, position, label, kind, value) "
+        "SELECT 1, 'weekly', '1', id, 0, label, kind, 'Rain' FROM prompt WHERE label = 'One fix for next week';"
+    )
+    old.commit()
+    old.close()
+
+    repo = Repo(connect(path))
+    assert [(p.label, p.kind) for p in repo.list_prompts("daily")] == [
+        ("Did I review my weekly plan this morning?", "yesno"),
+        ("What got in the way of today's tactics?", "text"),
+        ("Did I keep the commitments I made to myself today?", "yesno"),
+        ("What went really well?", "text"),
+        ("Energy", "rating"),
+    ]
+    # The prompt already there with a new default's wording is kept, not added twice.
+    assert [p.label for p in repo.list_prompts("weekly")] == [
+        "What did I accomplish this week?",
+        "If I executed under 85%, what got in the way?",
+        "Are my tactics moving my lag measures, or do they need to change?",
+        "What will I do differently next week?",
+    ]
+    answers = repo.get_week_review(1, 1).answers
+    assert [(a.prompt_id, a.label, a.value) for a in answers] == [(None, "One fix for next week", "Rain")]
 
 
 def test_a_failed_migration_leaves_nothing_behind(monkeypatch):
@@ -317,9 +357,9 @@ def test_prompts_and_day_reviews_keep_past_wording(repo):
     repo.save_day_review(DayReview(cycle.id, day, answers=[Answer(energy.id, "Energy", "rating", "4")]))
     repo.save_prompt(Prompt(energy.id, "daily", "Energy level", "rating", active=False))
     assert [p.label for p in repo.list_prompts("daily", active_only=True)] == [
-        "What went well?",
-        "What got in the way?",
-        "Top tactics for tomorrow",
+        "Did I review my weekly plan this morning?",
+        "What got in the way of today's tactics?",
+        "Did I keep the commitments I made to myself today?",
     ]
     repo.delete_prompt(energy.id)
     review = repo.get_day_review(cycle.id, day)
@@ -376,9 +416,6 @@ def test_factory_reset(repo):
 
     repo.factory_reset()
     assert not repo.is_configured and repo.list_cycles() == [] and repo.get_vision("long_term") == ""
-    assert [(p.label, p.position) for p in repo.list_prompts("daily")] == [
-        ("What went well?", 0),
-        ("What got in the way?", 1),
-        ("Top tactics for tomorrow", 2),
-    ]
-    assert [p.label for p in repo.list_prompts("weekly")] == ["What got in the way?", "One fix for next week"]
+    prompts = [(p.scope, p.label, p.kind) for scope in ("daily", "weekly") for p in repo.list_prompts(scope)]
+    assert prompts == DEFAULT_PROMPTS
+    assert [p.position for p in repo.list_prompts("daily")] == [0, 1, 2]

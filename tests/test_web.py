@@ -118,7 +118,7 @@ def test_full_cycle_flow(client, db_path):
     assert "pending for week 1" in client.get(base).text
     assert client.get(f"{base}/review").location == f"{base}/review/1"
     assert client.get(f"{base}/review/5").status_code == 404  # not reachable yet
-    obstacles, fix = (p.id for p in repo.list_prompts("weekly"))
+    _, obstacles, _, fix = (p.id for p in repo.list_prompts("weekly"))
 
     response = post(
         client,
@@ -736,13 +736,21 @@ def test_today_logging_and_daily_reflection(client, db_path):
     # Daily reflection with a rating prompt added in Settings.
     post(client, "/settings/prompts", {"scope": "daily", "label": "Energy", "kind": "rating"})
     energy = repo.list_prompts("daily")[-1]
-    went_well = repo.list_prompts("daily")[0]
+    reviewed_plan, in_the_way = repo.list_prompts("daily")[:2]
     response = post(client, f"{base}/day/2026-10-14", {f"p-{energy.id}": "7"})
     assert response.status_code == 422 and "rating from 1 to 5" in response.text
-    response = post(client, f"{base}/day/2026-10-14", {f"p-{went_well.id}": "Ran early", f"p-{energy.id}": "4"})
+    response = post(
+        client,
+        f"{base}/day/2026-10-14",
+        {f"p-{reviewed_plan.id}": "yes", f"p-{in_the_way.id}": "Rain", f"p-{energy.id}": "4"},
+    )
     assert response.location == f"{base}/day/2026-10-14#reflection"
     review = repo.get_day_review(cycle.id, date(2026, 10, 14))
-    assert [(a.label, a.value) for a in review.answers] == [("What went well?", "Ran early"), ("Energy", "4")]
+    assert [(a.label, a.value) for a in review.answers] == [
+        ("Did I review my weekly plan this morning?", "yes"),
+        ("What got in the way of today's tactics?", "Rain"),
+        ("Energy", "4"),
+    ]
     page = client.get(f"{base}/day/2026-10-14").text
     assert "✓ saved" in page and 'value="4" checked' in page
 
@@ -751,25 +759,27 @@ def test_settings_prompts(client, db_path):
     login(client)
     repo = repo_for(db_path)
     page = client.get("/settings").text
-    assert "Reflection prompts" in page and "One fix for next week" in page
+    assert "Reflection prompts" in page and "What will I do differently next week?" in page
 
     response = post(client, "/settings/prompts", {"scope": "weekly", "label": "Slept well?", "kind": "yesno"})
     slept = repo.list_prompts("weekly")[-1]
     assert response.location == f"/settings#prompt-{slept.id}" and slept.kind == "yesno"
     assert post(client, "/settings/prompts", {"scope": "monthly", "label": "x"}).status_code == 400
     post(client, "/settings/prompts", {"scope": "weekly", "label": " "})
-    assert len(repo.list_prompts("weekly")) == 3  # blank label rejected
+    assert len(repo.list_prompts("weekly")) == 5  # blank label rejected
 
     post(client, f"/settings/prompts/{slept.id}", {"label": "Slept 7h+?", "kind": "yesno"})
     post(client, f"/settings/prompts/{slept.id}/move", {"delta": "-1"})
     post(client, f"/settings/prompts/{slept.id}/toggle")
     assert [(p.label, p.active) for p in repo.list_prompts("weekly")] == [
-        ("What got in the way?", True),
+        ("What did I accomplish this week?", True),
+        ("If I executed under 85%, what got in the way?", True),
+        ("Are my tactics moving my lag measures, or do they need to change?", True),
         ("Slept 7h+?", False),
-        ("One fix for next week", True),
+        ("What will I do differently next week?", True),
     ]
     post(client, f"/settings/prompts/{slept.id}/delete")
-    assert len(repo.list_prompts("weekly")) == 2
+    assert len(repo.list_prompts("weekly")) == 4
     assert post(client, f"/settings/prompts/{slept.id}/delete").status_code == 404
 
 

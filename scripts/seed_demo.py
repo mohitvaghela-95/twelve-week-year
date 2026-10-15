@@ -34,7 +34,7 @@ def seed(repo: Repo, today: date) -> None:
     ]
 
     notes = ["Travel for work", "", "Sick two days", "Late meetings", "", "Kids' school holiday"]
-    obstacles, fix = repo.list_prompts("weekly")
+    _, obstacles, _, fix = repo.list_prompts("weekly")
     value = 82.0
     for week in range(1, 7):
         entries = []
@@ -63,12 +63,15 @@ def seed(repo: Repo, today: date) -> None:
             if t.active_in(7) and rng.random() < 0.35:
                 repo.log_tactic(t.id, day, 1)
     if today > week_first:
-        went_well = repo.list_prompts("daily")[0]
+        reviewed_plan, in_the_way, _ = repo.list_prompts("daily")
         repo.save_day_review(
             DayReview(
                 cycle.id,
                 today - timedelta(days=1),
-                answers=[Answer(went_well.id, went_well.label, "text", "Ran before work")],
+                answers=[
+                    Answer(reviewed_plan.id, reviewed_plan.label, reviewed_plan.kind, "yes"),
+                    Answer(in_the_way.id, in_the_way.label, in_the_way.kind, "Late meeting ran over"),
+                ],
             )
         )
 
