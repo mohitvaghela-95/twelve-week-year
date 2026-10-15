@@ -22,7 +22,9 @@ from flask import (
     url_for,
 )
 
+from twy.calendars import MAX_LINKS
 from twy.db import backup_to, connect
+from twy.domain.compare import summary as compare_summary
 from twy.domain.dates import (
     EXECUTION_WEEKS,
     REVIEW_WEEK,
@@ -64,6 +66,7 @@ from twy.services import (
     parse_day_window,
     parse_float,
     parse_goal_form,
+    parse_import_urls,
     parse_int,
     parse_max_weekly_items,
     parse_prompt_form,
@@ -88,23 +91,34 @@ from twy.services import (
 from twy.web.ics import render_calendar
 from twy.web.svg import score_chart_svg
 from twy.week_plans import (
+    FORM_FIELDS,
+    active_tactics,
+    actual_form,
     after_block_saved,
     after_tactic_saved,
     before_block_deleted,
     before_tactics_deleted,
     copy_prev_items,
+    form_rows,
+    imports_for_week,
     next_week_to_plan,
-    parse_week_rows,
+    parse_plan_rows,
+    parse_review_record,
+    plan_form,
     plannable_weeks,
-    posted_groups,
+    posted_form,
+    recordable,
     resolved_items,
+    review_record,
+    save_actual,
     save_week_plan,
     shortfall,
-    tactic_groups,
     unplanned_reminders,
     week_ended,
     week_plan_check,
+    week_record,
     week_sessions,
+    week_view,
 )
 
 bp = Blueprint("web", __name__)
@@ -188,6 +202,9 @@ def posted_slots() -> list[Slot]:
 def to_plan(cycle: Cycle, anchor: str | None = None):
     return redirect(url_for(".plan", cycle_id=cycle.id, _anchor=anchor))
 
+
+# What a session on the Week page, Today or a week's plan is, as people read it.
+SESSION_KINDS = {**BLOCK_KINDS, "event": "Event"}
 
 # Cycle statuses as people read them (the stored ones are short identifiers).
 STATUS_LABELS = {"planning": "Planning", "active": "In progress", "review": "Week 13 review", "closed": "Closed"}
@@ -655,18 +672,22 @@ def week(cycle_id: int, week_no: int):
     cycle = load_cycle(cycle_id)
     if not 1 <= week_no <= REVIEW_WEEK:
         abort(404)
-    sessions = week_sessions(r, cycle, week_no)
+    view = week_view(r, cycle, week_no, today())
+    sessions = view.sessions
+    imported = imports_for_week(r, cycle, week_no)
+    shown = sorted(sessions + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     first, last = week_range(cycle.start_date, week_no)
     days = [first + timedelta(days=i) for i in range(7)]
     # Timeline bounds (desktop): whole hours around the week's sessions, at least 07:00–21:00.
-    lo = min([s.start_min for s in sessions] + [7 * 60]) // 60 * 60
-    hi = -(-max([s.end_min for s in sessions] + [21 * 60]) // 60) * 60
-    planned = week_no in r.planned_weeks(cycle.id)
+    ghosts = [g for g, _label in view.ghosts]
+    lo = min([s.start_min for s in shown + ghosts] + [7 * 60]) // 60 * 60
+    hi = -(-max([s.end_min for s in shown + ghosts] + [21 * 60]) // 60) * 60
+    planned = view.planned
+    ended = week_ended(cycle, week_no, today())
     tactics = r.list_tactics(cycle.id) if week_no <= EXECUTION_WEEKS else []
     tactics = [t for t in tactics if t.active_in(week_no)]
     can_plan = (
         cycle.status != "closed"
-        and bool(tactics)
         and week_no in plannable_weeks(cycle, today())
         and not week_ended(cycle, week_no, today())
     )
@@ -676,17 +697,23 @@ def week(cycle_id: int, week_no: int):
         week_no=week_no,
         first=first,
         last=last,
-        days=[(d, [s for s in sessions if s.day == d]) for d in days],
-        clashes=overlaps(sessions),
-        layout=lanes(sessions),
-        kinds=BLOCK_KINDS,
+        days=[(d, [s for s in shown if s.day == d]) for d in days],
+        clashes=overlaps(shown),
+        layout=lanes(shown),
+        imported=imported,
+        kinds=SESSION_KINDS,
         total_min=sum(s.duration_min for s in sessions),
         session_count=len(sessions),
         planned=planned,
         has_tactics=bool(tactics),
-        short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned else [],
+        short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned and not ended else [],
         can_plan=can_plan,
         plan_url=url_for(".week_plan", cycle_id=cycle.id, week_no=week_no),
+        ended=ended,
+        view=view,
+        ghosts_by_day={d: [(g, label) for g, label in view.ghosts if g.day == d] for d in days},
+        can_record=recordable(cycle, week_no, today()),
+        record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no),
         lo=lo,
         span=hi - lo,
         hours=list(range(lo, hi, 60)),
@@ -696,22 +723,21 @@ def week(cycle_id: int, week_no: int):
     )
 
 
-def plan_page(cycle: Cycle, week_no: int, groups, error: str | None = None, copied: bool = False):
+def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied: bool = False):
     r = repo()
     first, last = week_range(cycle.start_date, week_no)
-    busy = week_sessions(r, cycle, week_no)
+    imported = imports_for_week(r, cycle, week_no)
+    saved = sorted(week_sessions(r, cycle, week_no) + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     return render_template(
         "week_plan.html",
         cycle=cycle,
         week_no=week_no,
         first=first,
         last=last,
-        groups=groups,
-        days=[
-            (d, [s for s in busy if s.day == d and s.owner != "tactic"])
-            for d in (first + timedelta(days=i) for i in range(7))
-        ],
-        kinds=BLOCK_KINDS,
+        form=form,
+        days=[(d, [s for s in saved if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        imported=imported,
+        kinds=SESSION_KINDS,
         planned=week_no in r.planned_weeks(cycle.id),
         can_copy=week_no > 1 and week_no - 1 in r.planned_weeks(cycle.id),
         copied=copied,
@@ -729,43 +755,114 @@ def plannable_week(cycle_id: int, week_no: int) -> Cycle:
     return cycle
 
 
+def posted_plan_rows():
+    return form_rows({name: request.form.getlist(name) for name in FORM_FIELDS})
+
+
 @bp.route("/c/<int:cycle_id>/week/<int:week_no>/plan", methods=["GET", "POST"])
 def week_plan(cycle_id: int, week_no: int):
-    """Plan one week: place each tactic's sessions around what's already on."""
+    """Plan one week: place each tactic's sessions around what's already on, and adjust the blocks."""
     r = repo()
+    if request.method == "GET" and recordable(load_cycle(cycle_id), week_no, today()):
+        # The week is over: its plan is kept as it was, and changes now record what happened.
+        return redirect(url_for(".week_actual", cycle_id=cycle_id, week_no=week_no))
     cycle = plannable_week(cycle_id, week_no)
-    f = request.form
-    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
+    tactics = active_tactics(r, cycle, week_no)
     if request.method == "POST":
+        rows = posted_plan_rows()
         try:
-            items = parse_week_rows(
-                cycle, week_no, [g.tactic for g in tactic_groups(r, cycle, week_no, [])], f.getlist("slot_kind"), *lists
-            )
+            items = parse_plan_rows(cycle, week_no, tactics, r.list_blocks(cycle.id), rows)
             save_week_plan(r, cycle, week_no, today(), items)
         except FormError as e:
-            return plan_page(cycle, week_no, posted_groups(r, cycle, week_no, *lists), str(e))
-        short = shortfall([g.tactic for g in tactic_groups(r, cycle, week_no, [])], items)
-        note = "; ".join(f"{t.title} {n} of {t.times_per_week}" for t, n in short)
+            return plan_page(cycle, week_no, posted_form(r, cycle, week_no, rows), str(e))
+        note = "; ".join(f"{t.title} {n} of {t.times_per_week}" for t, n in shortfall(tactics, items))
         flash(f"Week {week_no} planned." + (f" Not all placed: {note}." if note else ""), "warn" if note else "info")
         return redirect(url_for(".week", cycle_id=cycle.id, week_no=week_no))
 
+    items = resolved_items(r, cycle, week_no)
     copied = request.args.get("copy") == "prev"
-    items = copy_prev_items(r, cycle, week_no) if copied else None
-    if copied and items is None:
-        flash(f"Week {week_no - 1} wasn't planned, so there's nothing to copy.", "warn")
-        copied = False
-    if items is None:
-        items = resolved_items(r, cycle, week_no)
-    return plan_page(cycle, week_no, tactic_groups(r, cycle, week_no, items), copied=copied)
+    if copied:
+        previous = copy_prev_items(r, cycle, week_no)
+        if previous is None:
+            flash(f"Week {week_no - 1} wasn't planned, so there's nothing to copy.", "warn")
+            copied = False
+        else:
+            items = previous + [i for i in items if i.kind != "tactic"]
+    return plan_page(cycle, week_no, plan_form(r, cycle, week_no, items), copied=copied)
 
 
 @bp.post("/c/<int:cycle_id>/week/<int:week_no>/plan/check")
 def week_plan_check_json(cycle_id: int, week_no: int):
     """Live clash hints and placed counts for the planning form."""
     cycle = plannable_week(cycle_id, week_no)
-    f = request.form
-    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
-    return jsonify(week_plan_check(repo(), cycle, week_no, *lists))
+    return jsonify(week_plan_check(repo(), cycle, week_no, posted_plan_rows()))
+
+
+def local_next(default: str) -> str:
+    """Where to go after a form, from `next`, if it's a path on this site."""
+    target = request.values.get("next", "")
+    return target if target.startswith("/") and not target.startswith("//") else default
+
+
+def actual_page(cycle: Cycle, week_no: int, form, record, error: str | None = None):
+    r = repo()
+    first, last = week_range(cycle.start_date, week_no)
+    imported = imports_for_week(r, cycle, week_no)
+    planned = sorted(week_sessions(r, cycle, week_no) + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
+    return render_template(
+        "week_actual.html",
+        cycle=cycle,
+        week_no=week_no,
+        first=first,
+        last=last,
+        form=form,
+        record=record,
+        summary=summary_text(record),
+        days=[(d, [s for s in planned if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        imported=imported,
+        kinds=SESSION_KINDS,
+        next_url=local_next(""),
+        error=error,
+        today=today(),
+        tab="week",
+    ), 422 if error else 200
+
+
+def summary_text(record) -> str | None:
+    if not record.planned:
+        return None
+    return compare_summary(record.changes) if record.recorded else "Not recorded yet, so taken as planned"
+
+
+@bp.route("/c/<int:cycle_id>/week/<int:week_no>/actual", methods=["GET", "POST"])
+def week_actual(cycle_id: int, week_no: int):
+    """After a week: record what actually happened, beside the plan it had."""
+    r = repo()
+    cycle = writable_cycle(cycle_id)
+    if not recordable(cycle, week_no, today()):
+        abort(404)
+    record = week_record(r, cycle, week_no)
+    done = local_next(url_for(".week", cycle_id=cycle.id, week_no=week_no))
+    if request.method == "POST":
+        if request.form.get("action") == "reset":
+            r.clear_actual(cycle.id, week_no)
+            flash(f"Week {week_no} now reads as having gone to plan.")
+            return redirect(done)
+        rows = posted_plan_rows()
+        try:
+            items = parse_plan_rows(
+                cycle, week_no, r.list_tactics(cycle.id), r.list_blocks(cycle.id), rows, record.plan_by_id
+            )
+            changed = save_actual(r, cycle, week_no, today(), items)
+        except FormError as e:
+            return actual_page(cycle, week_no, posted_form(r, cycle, week_no, rows, record.plan_by_id), record, str(e))
+        record = week_record(r, cycle, week_no)
+        if not record.planned:
+            flash(f"Saved what happened in week {week_no}. It wasn't planned, so there's nothing to compare.")
+        else:
+            flash(f"Week {week_no}: {compare_summary(record.changes) if changed else 'went to plan'}.")
+        return redirect(done)
+    return actual_page(cycle, week_no, actual_form(r, cycle, week_no, record), record)
 
 
 # -- today ------------------------------------------------------------------------
@@ -816,6 +913,7 @@ def day_page(cycle_id: int, iso: str):
     week_no = week_of(cycle, day)
     first, last = week_range(cycle.start_date, week_no)
     rows = today_rows(r, cycle, day)
+    imported = imports_for_week(r, cycle, week_no)
     return render_template(
         "today.html",
         cycle=cycle,
@@ -827,9 +925,14 @@ def day_page(cycle_id: int, iso: str):
         today=today(),
         rows=rows,
         progress=week_progress(rows),
-        sessions=[s for s in week_sessions(r, cycle, week_no) if s.day == day],
+        sessions=sorted(
+            [s for s in week_sessions(r, cycle, week_no) if s.day == day] + imported.on(day),
+            key=lambda s: (s.start_min, s.title),
+        ),
+        all_day=imported.all_day.get(day, []),
+        import_errors=imported.errors,
         unplanned=unplanned_reminders(r, cycle, today()),
-        kinds=BLOCK_KINDS,
+        kinds=SESSION_KINDS,
         existing=existing,
         items=items,
         error=error,
@@ -883,11 +986,17 @@ def review(cycle_id: int, week_no: int):
     lag_goals = [g for g in r.list_goals(cycle.id) if g.measurable]
     items = reflection_items(r.list_prompts("weekly", active_only=True), existing.answers if existing else [])
     values = {f"lag-{g.id}": fmt_num(r.goal_progress(g.id).get(week_no)) for g in lag_goals}
+    what_happened = review_record(r, cycle, week_no, today())
     error = None
 
     if request.method == "POST":
         if read_only:
             abort(403, "This cycle is closed and read-only.")
+        # "What happened" is part of the same form: checked first, saved only if it was changed.
+        record_rows = (
+            posted_plan_rows() if what_happened and what_happened.form and "record_present" in request.form else None
+        )
+        happened = None
         done = {}
         for row in rows:
             if row.tactic_id is None:
@@ -904,12 +1013,21 @@ def review(cycle_id: int, week_no: int):
                 progress = {g.id: parse_float(values[f"lag-{g.id}"]) for g in lag_goals}
             except ValueError:
                 raise FormError("Lag measures must be numbers.") from None
+            if record_rows is not None:
+                try:
+                    happened = parse_review_record(r, cycle, week_no, record_rows)
+                except FormError as e:
+                    raise FormError(f"What happened: {e}") from None
         except FormError as e:
             error = str(e)
             for row, entry in zip(rows, entries):
                 row.done = entry.done
+            if record_rows is not None:
+                what_happened.form = posted_form(r, cycle, week_no, record_rows, what_happened.record.plan_by_id)
         else:
             score = save_week(r, cycle, week_no, entries, answers, progress)
+            if happened is not None:
+                save_actual(r, cycle, week_no, today(), happened)
             pending = pending_weeks(r, cycle, today())
             if pending:
                 # Catching up: go straight on to the next week still to score.
@@ -941,6 +1059,10 @@ def review(cycle_id: int, week_no: int):
         error=error,
         read_only=read_only,
         in_progress=current_week(cycle.start_date, today()).week_no,
+        what_happened=what_happened,
+        record_open=bool(error and request.method == "POST" and "record_present" in request.form)
+        or bool(what_happened and (what_happened.hints or what_happened.record.recorded)),
+        record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no, next=request.path),
         tab="review",
     ), 422 if error else 200
 
@@ -1040,18 +1162,16 @@ def vision():
 @bp.route("/settings", methods=["GET", "POST"])
 def settings():
     r = repo()
-    week_start, max_items, alert, error = r.week_start, str(r.max_weekly_items), str(r.alert_minutes), None
-    day_start, day_end = (hhmm(m) for m in r.day_window)
+    fields, error = saved_settings_fields(), None
     if request.method == "POST":
         week_start = request.form.get("week_start", type=int)
         if week_start is None or not 0 <= week_start <= 6:
             abort(400)
-        max_items = request.form.get("max_weekly_items", "")
-        alert = request.form.get("alert_minutes", "")
-        day_start, day_end = request.form.get("day_start", ""), request.form.get("day_end", "")
+        fields = {k: request.form.get(k, "") for k in fields} | {"week_start": week_start}
         try:
-            limit, alert_minutes = parse_max_weekly_items(max_items), parse_alert_minutes(alert)
-            window = parse_day_window(day_start, day_end)
+            limit = parse_max_weekly_items(fields["max_weekly_items"])
+            alert_minutes = parse_alert_minutes(fields["alert_minutes"])
+            window = parse_day_window(fields["day_start"], fields["day_end"])
         except FormError as e:
             error = str(e)
         else:
@@ -1062,23 +1182,39 @@ def settings():
             r.set_setting("day_end", str(window[1]))
             flash(f"Settings saved. Weeks start on {WEEKDAY_NAMES[week_start]}.")
             return redirect(url_for(".settings"))
+    return settings_page(fields, error=error)
+
+
+def settings_page(fields: dict, error: str | None = None, import_text: str | None = None, import_error=None):
+    r = repo()
     feed_url = url_for(".calendar_feed", token=r.calendar_token, _external=True)
     return render_template(
         "settings.html",
         weekdays=WEEKDAY_NAMES,
-        week_start=week_start,
-        max_weekly_items=max_items,
-        alert_minutes=alert,
-        day_start=day_start,
-        day_end=day_end,
+        **fields,
         feed_url=feed_url,
         webcal_url="webcal://" + feed_url.split("://", 1)[1],
         error=error,
+        import_urls="\n".join(r.import_urls) if import_text is None else import_text,
+        import_error=import_error,
+        MAX_LINKS=MAX_LINKS,
         db_path=current_app.config["TWY_DB"],
         prompts={scope: r.list_prompts(scope) for scope in PROMPT_SCOPES},
         prompt_kinds=PROMPT_KINDS,
         tab="settings",
     )
+
+
+def saved_settings_fields() -> dict:
+    r = repo()
+    day_start, day_end = (hhmm(m) for m in r.day_window)
+    return {
+        "week_start": r.week_start,
+        "max_weekly_items": str(r.max_weekly_items),
+        "alert_minutes": str(r.alert_minutes),
+        "day_start": day_start,
+        "day_end": day_end,
+    }
 
 
 def load_prompt(prompt_id: int) -> Prompt:
@@ -1139,6 +1275,20 @@ def prompt_delete(prompt_id: int):
     repo().delete_prompt(prompt.id)
     flash(f"Deleted “{prompt.label}”. Past answers to it are kept.")
     return to_prompts()
+
+
+@bp.post("/settings/imports")
+def settings_imports():
+    text = request.form.get("import_urls", "")
+    try:
+        urls = parse_import_urls(text)
+    except FormError as e:
+        return settings_page(saved_settings_fields(), import_text=text, import_error=str(e)), 422
+    repo().set_setting("import_urls", "\n".join(urls))
+    flash(
+        f"Planning around {len(urls)} calendar{'s' if len(urls) != 1 else ''}." if urls else "Calendar links removed."
+    )
+    return redirect(url_for(".settings", _anchor="imports"))
 
 
 @bp.post("/settings/calendar/reset")

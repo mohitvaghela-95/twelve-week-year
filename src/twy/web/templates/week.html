@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Week {{ week_no }} · {{ cycle.name }}{% endblock %}
 {% block body_class %}wide{% endblock %}
-{#- Tactic sessions open this week's plan while it can still change; blocks open their weekly times. -#}
+{#- Tactic sessions open this week's plan while it can still change, and once it's over, the page
+    recording what happened. Blocks open their weekly times. -#}
 {% macro edit_url(s) -%}
-{%- if read_only %}{% elif s.owner == "tactic" %}{{ plan_url if can_plan }}{% elif s.owner_id %}{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}{% endif -%}
+{%- if read_only %}{% elif s.owner in ("tactic", "event") %}{{ plan_url if can_plan else (record_url if can_record and s.owner == "tactic") }}{% elif s.owner_id %}{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}{% endif -%}
 {%- endmacro %}
 {% macro session_tag(s) -%}{{ "a" if edit_url(s) else "div" }}{%- endmacro %}
 {#- With JavaScript, tapping a session shows its details first (#session-pop); the link to edit is the fallback. -#}
@@ -11,24 +12,33 @@
 {% if edit_url(s) %} href="{{ edit_url(s) }}" data-session data-title="{{ s.title }}"
   data-when="{{ s.day.strftime('%A') }} {{ s.start_min|hhmm }}–{{ s.end_min|hhmm }}"
   data-what="{{ s.context or kinds.get(s.kind, 'Tactic') }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
-  data-edit-label="Edit {{ 'week plan' if s.owner == 'tactic' else 'block' }}"{% endif %}
+  data-edit-label="{{ 'Edit block' if s.owner == 'block' else ('Edit what happened' if ended else 'Edit week plan') }}"{% endif %}
 {%- endmacro %}
 {% block content %}
 <div class="page-head">
   <h1>Week {{ week_no }}</h1>
   <span class="tag">{{ first.day }} {{ first.strftime("%b") }} – {{ last.day }} {{ last.strftime("%b") }}</span>
 </div>
-<p class="muted">{{ cycle.name }}{{ " · review week" if week_no == 13 }}</p>
+<p class="muted">{{ cycle.name }}{{ " · review week" if week_no == 13 }}{% if ended and not planned and has_tactics %} · <span class="tag">Not planned</span>{% endif %}</p>
 
 <nav class="weekpicker" aria-label="Week">
   {% for w in range(1, 14) %}<a class="chip{{ ' on' if w == week_no }}"{% if w == week_no %} aria-current="page"{% endif %} href="{{ url_for('web.week', cycle_id=cycle.id, week_no=w) }}">{{ w }}</a>{% endfor %}
 </nav>
 
 <p class="week-summary">
-  {{ session_count }} session{{ "s" if session_count != 1 }} · {{ total_min // 60 }}h{% if total_min % 60 %} {{ total_min % 60 }}m{% endif %} planned
+  {{ session_count }} session{{ "s" if session_count != 1 }} · {{ total_min // 60 }}h{% if total_min % 60 %} {{ total_min % 60 }}m{% endif %} {{ "happened" if view.recorded else "planned" }}
   {% if clashes %}<span class="warn-line"> · ⚠ {{ clashes|length }} overlapping</span>{% endif %}
 </p>
-{% if has_tactics and not planned %}
+{% if ended and planned %}
+<p class="compare-summary">
+  {% if view.summary %}Against the plan: {{ view.summary }}.{% else %}Not recorded, so taken as planned.{% endif %}
+  {% if view.ghosts %}<span class="muted small">Faint outlines show where moved and missed sessions were planned.</span>{% endif %}
+</p>
+{% endif %}
+{% if can_record and (planned or has_tactics or view.recorded) %}
+<p><a class="btn small{{ ' primary' if planned and not view.recorded }}" href="{{ record_url }}">{{ "Edit what happened" if view.recorded else "Record what happened" }}</a></p>
+{% endif %}
+{% if has_tactics and not planned and not ended %}
 <div class="banner warn">
   Week {{ week_no }} isn't planned yet.
   {% if can_plan %}<a href="{{ plan_url }}">Plan week {{ week_no }}</a>{% endif %}
@@ -43,7 +53,8 @@
 {% if can_plan %}
 <p><a class="btn small{{ ' primary' if not planned }}" href="{{ plan_url }}">{{ "Edit week " ~ week_no ~ "'s plan" if planned else "Plan week " ~ week_no }}</a></p>
 {% endif %}
-{% if not session_count %}
+{% for error in imported.errors %}<p class="muted small import-error">⚠ {{ error }}</p>{% endfor %}
+{% if not session_count and not imported.timed and not imported.all_day and not view.ghosts %}
 <section class="card empty">
   <p>Nothing scheduled this week.</p>
   <p class="muted small">Plan the week to place your tactics, or add time blocks on the Plan page.</p>
@@ -55,33 +66,47 @@
   {% for day, items in days %}
   <section class="card day{{ ' today' if day == today }}">
     <h2>{{ day.strftime("%A") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h2>
+    {% for title in imported.all_day.get(day, []) %}<p class="allday small">{{ title }}</p>{% endfor %}
     {% for s in items %}
     <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
-      <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
+      <span class="what"><strong>{{ s.title }}{% if s.uid in view.badges %} <span class="badge">{{ view.badges[s.uid] }}</span>{% endif %}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
     {% else %}
-    <p class="muted small">Nothing scheduled.</p>
+    {% if not imported.all_day.get(day) and not ghosts_by_day[day] %}<p class="muted small">Nothing scheduled.</p>{% endif %}
+    {% endfor %}
+    {% for g, label in ghosts_by_day[day] %}
+    <div class="session ghost kind-{{ g.kind }}">
+      <span class="time">{{ g.start_min|hhmm }}<br><span class="muted">{{ g.end_min|hhmm }}</span></span>
+      <span class="what"><strong>{{ g.title }}</strong><span class="muted small">Planned · {{ label }}</span></span>
+    </div>
     {% endfor %}
   </section>
   {% endfor %}
 </div>
 
 {# Desktop: a 7-day timeline. Positions are percentages of the visible hours. #}
-<div class="timeline" style="--span: {{ span }}">
+<div class="timeline{{ ' has-allday' if imported.all_day }}" style="--span: {{ span }}">
   <div class="tl-hours">
     {% for h in hours %}<span style="top: {{ '%.3f' % ((h - lo) / span * 100) }}%">{{ h|hhmm }}</span>{% endfor %}
   </div>
   {% for day, items in days %}
   <div class="tl-day{{ ' today' if day == today }}">
     <div class="tl-head">{{ day.strftime("%a") }} <strong>{{ day.day }}</strong></div>
+    {% if imported.all_day %}<div class="tl-allday">{% for title in imported.all_day.get(day, []) %}<span class="allday" title="{{ title }}">{{ title }}</span>{% endfor %}</div>{% endif %}
     <div class="tl-body">
+      {% for g, label in ghosts_by_day[day] %}
+      <div class="tl-item tl-ghost kind-{{ g.kind }}" title="Planned {{ g.start_min|hhmm }}–{{ g.end_min|hhmm }} {{ g.title }} · {{ label }}"
+        style="top: {{ '%.3f' % ((g.start_min - lo) / span * 100) }}%; height: {{ '%.3f' % (g.duration_min / span * 100) }}%; --lane: 0; --lanes: 1">
+        <span class="time">{{ g.start_min|hhmm }}</span> {{ g.title }} · {{ label }}
+      </div>
+      {% endfor %}
       {% for s in items %}
       {% set lane, count = layout[s.uid] %}
       <{{ session_tag(s) }} class="tl-item kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}
         title="{{ s.start_min|hhmm }}–{{ s.end_min|hhmm }} {{ s.title }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
         style="top: {{ '%.3f' % ((s.start_min - lo) / span * 100) }}%; height: {{ '%.3f' % (s.duration_min / span * 100) }}%; --lane: {{ lane }}; --lanes: {{ count }}">
-        <span class="time">{{ s.start_min|hhmm }}</span> {{ s.title }}
+        <span class="time">{{ s.start_min|hhmm }}</span> {{ s.title }}{% if s.uid in view.badges %} <span class="badge">{{ view.badges[s.uid] }}</span>{% endif %}
       </{{ session_tag(s) }}>
       {% endfor %}
     </div>
@@ -92,6 +117,7 @@
 <p class="legend small">
   <span><span class="kind-dot kind-tactic"></span>Tactic</span>
   {% for key, label in kinds.items() %}<span><span class="kind-dot kind-{{ key }}"></span>{{ label }}</span>{% endfor %}
+  {% if imported.timed or imported.all_day %}<span><span class="kind-dot kind-import"></span>Your calendar</span>{% endif %}
 </p>
 <div id="session-pop" class="session-pop" popover></div>
 {% endif %}
