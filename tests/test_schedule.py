@@ -8,10 +8,11 @@ from twy.domain.schedule import (
     lanes,
     overlaps,
     planning_offset,
-    sessions_for_week,
+    sessions_from_items,
     slot_date,
+    template_items,
 )
-from twy.models import Block, Cycle, Slot, Tactic
+from twy.models import Block, Cycle, Slot, WeekItem
 
 MON = date(2026, 10, 5)
 SUN = MON + timedelta(days=6)
@@ -30,7 +31,7 @@ def session(day, start, minutes, slot_id):
         kind="tactic",
         owner="tactic",
         owner_id=1,
-        slot_id=slot_id,
+        key=f"s-{slot_id}",
         cycle_id=1,
         week_no=1,
     )
@@ -43,27 +44,46 @@ def test_slot_date_follows_the_cycle_week():
     assert slot_date(saturday_weeks, 2, 4) == date(2026, 10, 16)  # Friday ends week 2
 
 
-def test_sessions_respect_tactic_ranges_and_week_13():
+def test_an_unplanned_week_is_its_blocks_in_weeks_1_to_13():
     c = cycle()
-    study = Tactic(id=1, goal_id=1, title="Study", times_per_week=2)
-    mocks = Tactic(id=2, goal_id=1, title="Mock interview", start_week=10, end_week=12)
-    slots = {1: [Slot(0, 420, 60, id=1), Slot(2, 420, 60, id=2)], 2: [Slot(5, 600, 90, id=3)]}
     admin = Block(id=1, cycle_id=1, title="Admin", kind="admin", slots=[Slot(4, 960, 30, id=4)])
+    [item] = template_items(c, 13, [admin])
+    assert (item.kind, item.block_id, item.title, item.weekday) == ("block", 1, "Admin", 4)
+    assert (item.orig_weekday, item.orig_start_min) == (4, 960)
+    assert template_items(c, 14, [admin]) == []
 
-    week1 = sessions_for_week(c, 1, [study, mocks], slots, {1: "AI engineer offer"}, [admin])
-    assert [(s.title, s.day) for s in week1] == [
-        ("Study", date(2026, 10, 5)),
-        ("Study", date(2026, 10, 7)),
-        ("Admin", date(2026, 10, 9)),
+
+def test_sessions_from_items_number_tactics_and_keep_block_keys():
+    c = cycle()
+    study = [
+        WeekItem(1, 2, "tactic", 2, 420, 60, tactic_id=1, title="Study"),
+        WeekItem(1, 2, "tactic", 0, 420, 60, tactic_id=1, title="Study"),
     ]
-    assert week1[0].context == "AI engineer offer"
-    assert week1[0].uid == "tactic-1-20261005@twy"
-    assert {s.title for s in sessions_for_week(c, 10, [study, mocks], slots, {}, [admin])} == {
-        "Study",
-        "Mock interview",
-        "Admin",
-    }
-    assert [s.title for s in sessions_for_week(c, 13, [study, mocks], slots, {}, [admin])] == ["Admin"]
+    admin = WeekItem(1, 2, "block", 4, 960, 30, block_id=3, title="Admin", orig_weekday=4, orig_start_min=960)
+    moved = replace(admin, weekday=5, start_min=600, custom=True)
+    skipped = WeekItem(1, 2, "block", 6, 600, 60, block_id=4, title="Chores", skipped=True)
+
+    week2 = sessions_from_items(c, 2, [*study, admin, skipped], {1: "AI engineer offer"}, {3: "admin"})
+    assert [(s.title, s.day, s.kind) for s in week2] == [
+        ("Study", date(2026, 10, 12), "tactic"),
+        ("Study", date(2026, 10, 14), "tactic"),
+        ("Admin", date(2026, 10, 16), "admin"),
+    ]
+    assert week2[0].context == "AI engineer offer"
+    # Numbered in time order, so re-saving the same plan keeps every calendar event's identity.
+    assert [s.uid for s in week2] == ["tactic-1-w2-1@twy", "tactic-1-w2-2@twy", "block-3-20261016-960@twy"]
+    # A block moved for one week keeps its key, so calendar apps move the event rather than adding one.
+    [moved_session] = sessions_from_items(c, 2, [moved], {}, {3: "admin"})
+    assert moved_session.uid == week2[2].uid and moved_session.day == date(2026, 10, 17)
+
+    # Events are numbered in time order within their cycle week.
+    dinner = WeekItem(1, 2, "event", 4, 1140, 120, title="Dinner")
+    dentist = WeekItem(1, 2, "event", 1, 540, 30, title="Dentist")
+    events = sessions_from_items(c, 2, [dinner, dentist], {}, {})
+    assert [(s.title, s.owner, s.kind, s.owner_id, s.uid) for s in events] == [
+        ("Dentist", "event", "event", None, "event-c1-w2-1@twy"),
+        ("Dinner", "event", "event", None, "event-c1-w2-2@twy"),
+    ]
 
 
 def test_overlaps_and_lanes():
@@ -109,6 +129,13 @@ def test_feed_adds_next_week_from_the_planning_day():
     c = cycle()
     assert feed_weeks([c], {1: 6}, SUN - timedelta(days=1)) == [(c, 1)]  # Saturday
     assert feed_weeks([c], {1: 6}, SUN) == [(c, 1), (c, 2)]  # review day itself
+
+
+def test_feed_adds_next_week_once_it_is_planned():
+    c = cycle()
+    assert feed_weeks([c], {1: 6}, MON + timedelta(days=2), planned={(1, 2)}) == [(c, 1), (c, 2)]
+    assert feed_weeks([c], {1: None}, MON, planned={(1, 2)}) == [(c, 1), (c, 2)]  # no review block needed
+    assert feed_weeks([c], {1: None}, MON, planned={(2, 2)}) == [(c, 1)]  # another cycle's week 2
 
 
 def test_feed_hands_over_to_the_next_cycle():

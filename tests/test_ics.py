@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -17,7 +18,7 @@ def session(day, title="Study", start=420, minutes=60):
         kind="tactic",
         owner="tactic",
         owner_id=1,
-        slot_id=7,
+        key="tactic-7-w1-1",
         cycle_id=1,
         week_no=1,
         context="AI engineer offer",
@@ -29,7 +30,7 @@ def test_calendar_structure_and_alert():
     assert text.endswith("\r\n") and "\n" not in text.replace("\r\n", "")
     lines = text.split("\r\n")
     assert lines[0] == "BEGIN:VCALENDAR" and lines[-2] == "END:VCALENDAR"
-    assert "UID:tactic-7-20261005@twy" in lines
+    assert "UID:tactic-7-w1-1@twy" in lines
     assert "DTSTART:20261005T060000Z" in lines  # 07:00 BST
     assert "DTEND:20261005T070000Z" in lines
     assert "DESCRIPTION:Goal: AI engineer offer\\nWeek 1 of 12" in lines
@@ -53,3 +54,16 @@ def test_escaping_and_folding():
     assert all(len(p.encode()) <= 75 for p in parts)
     assert all(p.startswith(" ") for p in parts[1:])
     assert parts[0] + "".join(p[1:] for p in parts[1:]) == line
+
+
+def test_categories_name_tactics_events_and_blocks():
+    tactic = session(date(2026, 10, 5))
+    event = replace(tactic, title="Dinner", kind="event", owner="event", owner_id=None, key="event-c1-w1-1", context="")
+    review = replace(tactic, title="Weekly review", kind="review", owner="block", key="block-1-20261011-1080")
+    text = render_calendar([tactic, event, review], 0, NOW, LONDON)
+    assert [line for line in text.split("\r\n") if line.startswith("CATEGORIES:")] == [
+        "CATEGORIES:Tactic",
+        "CATEGORIES:Event",
+        "CATEGORIES:Weekly review",
+    ]
+    assert "DESCRIPTION:Planned around in week 1" in text and "UID:event-c1-w1-1@twy" in text

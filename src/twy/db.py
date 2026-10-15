@@ -171,6 +171,52 @@ MIGRATIONS: list[str] = [
     ALTER TABLE week_entry_v4 RENAME TO week_entry;
     CREATE UNIQUE INDEX week_entry_tactic ON week_entry (cycle_id, week_no, tactic_id);
     """,
+    # v5: tactics are planned week by week. Weekly tactic slots go (slot becomes block-only), and each
+    # week's plan, and later what actually happened, is stored as dated items of that week.
+    """
+    CREATE TABLE slot_v5 (
+        id           INTEGER PRIMARY KEY,
+        block_id     INTEGER NOT NULL REFERENCES block(id) ON DELETE CASCADE,
+        weekday      INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),  -- 0 = Monday
+        start_min    INTEGER NOT NULL CHECK (start_min BETWEEN 0 AND 1439),
+        duration_min INTEGER NOT NULL CHECK (duration_min BETWEEN 5 AND 720)
+    );
+    INSERT INTO slot_v5 (id, block_id, weekday, start_min, duration_min)
+        SELECT id, block_id, weekday, start_min, duration_min FROM slot WHERE block_id IS NOT NULL;
+    DROP TABLE slot;
+    ALTER TABLE slot_v5 RENAME TO slot;
+    CREATE INDEX slot_block ON slot (block_id);
+
+    CREATE TABLE week_status (
+        cycle_id    INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        week_no     INTEGER NOT NULL CHECK (week_no BETWEEN 1 AND 13),
+        planned_at  TEXT,  -- set by saving the week's plan, even with nothing placed
+        recorded_at TEXT,  -- set by recording what happened; NULL = assumed as planned
+        PRIMARY KEY (cycle_id, week_no)
+    );
+    -- title is a snapshot, so a past week still reads well after its tactic or block is deleted.
+    CREATE TABLE week_item (
+        id             INTEGER PRIMARY KEY,
+        cycle_id       INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        week_no        INTEGER NOT NULL CHECK (week_no BETWEEN 1 AND 13),
+        layer          TEXT NOT NULL CHECK (layer IN ('plan', 'actual')),
+        kind           TEXT NOT NULL CHECK (kind IN ('tactic', 'block', 'event')),
+        tactic_id      INTEGER REFERENCES tactic(id) ON DELETE SET NULL,
+        block_id       INTEGER REFERENCES block(id) ON DELETE SET NULL,
+        plan_item_id   INTEGER REFERENCES week_item(id) ON DELETE SET NULL,  -- actual row: the plan row it records
+        title          TEXT NOT NULL DEFAULT '',
+        weekday        INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+        start_min      INTEGER NOT NULL CHECK (start_min BETWEEN 0 AND 1439),
+        duration_min   INTEGER NOT NULL CHECK (duration_min BETWEEN 5 AND 720),
+        skipped        INTEGER NOT NULL DEFAULT 0,  -- a block occurrence left out this week
+        custom         INTEGER NOT NULL DEFAULT 0,  -- a block occurrence skipped or moved this week
+        orig_weekday   INTEGER,  -- block rows: the weekly slot they came from
+        orig_start_min INTEGER
+    );
+    CREATE INDEX week_item_week ON week_item (cycle_id, week_no, layer);
+    CREATE INDEX week_item_tactic ON week_item (tactic_id);
+    CREATE INDEX week_item_block ON week_item (block_id);
+    """,
 ]
 
 

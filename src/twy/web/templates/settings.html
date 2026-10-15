@@ -68,7 +68,7 @@
 </section>
 <section class="card stack" id="calendar">
   <h2>Calendar</h2>
-  <p class="muted small">Subscribe once and this week's tactic sessions and time blocks appear in Calendar on your iPhone, iPad or Mac. From the day of your weekly review block, next week shows too. It refreshes on its own while the device is on your home Wi-Fi.</p>
+  <p class="muted small">Subscribe once and this week's tactic sessions, time blocks and events appear in Calendar on your iPhone, iPad or Mac. Next week shows once it's planned, or from the day of your weekly review block. It refreshes on its own while the device is on your home Wi-Fi.</p>
   <a class="btn primary block" href="{{ webcal_url }}">Subscribe on this device</a>
   <label for="feed_url">Calendar link</label>
   <div class="copy-row">
@@ -81,6 +81,16 @@
     <button class="btn warn">Reset link</button>
   </form>
 </section>
+<form method="post" action="{{ url_for('web.settings_imports') }}" class="card stack" id="imports">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <h2>Plan around your other calendars</h2>
+  <p class="muted small">Paste the private ICS link of a calendar, one per line (up to {{ MAX_LINKS }}). Its events show greyed on the week planning page, the Week page and Today, and count when twy checks for clashes. They're read-only and never go into twy's own calendar.</p>
+  <label for="import_urls">Calendar links</label>
+  <textarea id="import_urls" name="import_urls" rows="3" spellcheck="false" autocapitalize="off" placeholder="webcal://p01-caldav.icloud.com/published/2/…">{{ import_urls }}</textarea>
+  <p class="muted small">iCloud: in Calendar, share the calendar as a Public Calendar and copy its link. Google: Settings → the calendar → Secret address in iCal format. The home server fetches these links itself, so it needs internet access.</p>
+  {% if import_error %}<p class="error" role="alert">{{ import_error }}</p>{% endif %}
+  <button class="btn primary block">Save calendar links</button>
+</form>
 <section class="card stack">
   <h2>Backup</h2>
   <p class="muted small">Everything lives in one SQLite file on the server:<br><code>{{ db_path }}</code></p>

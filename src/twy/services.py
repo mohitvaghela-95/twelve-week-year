@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
 
+from twy.calendars import MAX_LINKS, normalise_url
 from twy.domain.conflicts import (
     PairWarning,
     Placed,
-    Weeks,
     check_rows,
     find_clashes,
     pair_warnings,
@@ -19,6 +19,7 @@ from twy.domain.conflicts import (
 )
 from twy.domain.dates import (
     EXECUTION_WEEKS,
+    REVIEW_WEEK,
     WEEKDAY_NAMES,
     CyclePosition,
     align_to_week_start,
@@ -27,7 +28,6 @@ from twy.domain.dates import (
     last_finished_week,
     week_range,
 )
-from twy.domain.schedule import Session, sessions_for_week
 from twy.domain.scoring import execution_score, goal_outcome
 from twy.models import (
     BLOCK_KINDS,
@@ -133,6 +133,22 @@ def parse_slots(days: list[str], times: list[str], minutes: list[str]) -> list[S
         except FormError as e:
             raise FormError(f"Slot {row}: {e}") from None
     return sorted(slots, key=lambda s: (s.weekday, s.start_min))
+
+
+def parse_import_urls(text: str) -> list[str]:
+    """Calendar links from the settings textarea, one per line; blank lines are ignored."""
+    urls: list[str] = []
+    for n, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        url = normalise_url(line)
+        if url is None:
+            raise FormError(f"Line {n} isn't a calendar link. Use one that starts with webcal://, https:// or http://.")
+        if url not in urls:
+            urls.append(url)
+    if len(urls) > MAX_LINKS:
+        raise FormError(f"Up to {MAX_LINKS} calendars, please.")
+    return urls
 
 
 def parse_day_window(start_text: str, end_text: str) -> tuple[int, int]:
@@ -291,56 +307,39 @@ def parse_tactic_form(tactic: Tactic, fields: Mapping[str, str]) -> Tactic:
 # -- schedule ---------------------------------------------------------------------
 
 
-def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
-    """Every tactic and block session in one cycle week, in time order."""
-    goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
-    return sessions_for_week(
-        cycle, week_no, repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), goals, repo.list_blocks(cycle.id)
-    )
-
-
 def plan_clashes(repo: Repo, cycle: Cycle) -> list[PairWarning]:
-    """Every pair of saved items whose calendar times overlap in a shared week."""
-    placed = placed_for_cycle(repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), repo.list_blocks(cycle.id))
-    return pair_warnings(find_clashes(placed))
+    """Every pair of blocks whose weekly times overlap."""
+    return pair_warnings(find_clashes(placed_for_cycle(repo.list_blocks(cycle.id))))
 
 
-def schedule_check(
-    repo: Repo,
-    cycle: Cycle,
-    owner: str,
-    owner_id: int | None,
-    weeks: Weeks,
-    days: list[str],
-    times: list[str],
-    minutes: list[str],
-) -> list[dict | None]:
-    """Live clash hints for the slot editor, one entry per posted row (None: blank, invalid or clear)."""
-    others = placed_for_cycle(
-        repo.list_tactics(cycle.id), repo.tactic_slots(cycle.id), repo.list_blocks(cycle.id), skip=(owner, owner_id)
-    )
-    rows: list[Placed] = []
-    index: list[int | None] = []  # posted row → position in `rows`
-    for n, (day, time, length) in enumerate(zip(days, times, minutes, strict=False), start=1):
+def form_slots(days: list[str], times: list[str], minutes: list[str]) -> list[Slot | None]:
+    """The slot editor's posted rows for live hints: None for a blank or not-yet-valid row."""
+    slots: list[Slot | None] = []
+    for day, time, length in zip(days, times, minutes, strict=False):
         try:
-            slot = parse_slot_row(day, time, length) if time.strip() else None
+            slots.append(parse_slot_row(day, time, length) if time.strip() else None)
         except FormError:
-            slot = None
-        index.append(None if slot is None else len(rows))
-        if slot is not None:
-            rows.append(Placed(f"slot {n}", owner, owner_id, weeks, slot, row=n))
+            slots.append(None)
+    return slots
 
-    checks = check_rows(rows, others, repo.day_window)
+
+def clash_hints(rows: list[Placed | None], others: list[Placed], window: tuple[int, int]) -> list[dict | None]:
+    """Clash notes and suggested moves for each posted row (None: blank, invalid or clear).
+
+    Saved items say which weeks they clash in when that's narrower than the item itself.
+    """
+    present = [p for p in rows if p is not None]
+    checks = iter(check_rows(present, others, window))
     results: list[dict | None] = []
-    for i in index:
-        if i is None or not checks[i].clashes:
+    for row in rows:
+        check = next(checks) if row is not None else None
+        if row is None or not check.clashes:
             results.append(None)
             continue
-        row, check = rows[i], checks[i]
         notes = []
         for other, shared in check.clashes:
             note = f"Overlaps {other.title} · {other.slot.label}"
-            notes.append(note if other.row is not None else f"{note} · {weeks_label(shared)}")
+            notes.append(note if other.row is not None or shared[0] == shared[1] else f"{note} · {weeks_label(shared)}")
         results.append(
             {
                 "clashes": notes,
@@ -352,6 +351,18 @@ def schedule_check(
             }
         )
     return results
+
+
+def schedule_check(
+    repo: Repo, cycle: Cycle, block_id: int | None, days: list[str], times: list[str], minutes: list[str]
+) -> list[dict | None]:
+    """Live clash hints for the block form's slot editor, one entry per posted row."""
+    others = placed_for_cycle(repo.list_blocks(cycle.id), skip=block_id)
+    rows = [
+        None if slot is None else Placed(f"slot {n}", "block", block_id, (1, REVIEW_WEEK), slot, row=n)
+        for n, slot in enumerate(form_slots(days, times, minutes), start=1)
+    ]
+    return clash_hints(rows, others, repo.day_window)
 
 
 # -- weekly review ----------------------------------------------------------------

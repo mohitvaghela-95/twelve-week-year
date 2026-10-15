@@ -2,6 +2,7 @@
 
 import secrets
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime
 
 from twy.domain.conflicts import DEFAULT_DAY_WINDOW
@@ -17,6 +18,7 @@ from twy.models import (
     Slot,
     Tactic,
     WeekEntry,
+    WeekItem,
     WeekReview,
 )
 
@@ -78,10 +80,25 @@ def _prompt(row: sqlite3.Row) -> Prompt:
     )
 
 
-def _owner(column: str) -> str:
-    if column not in ("tactic_id", "block_id"):
-        raise ValueError(column)
-    return column
+def _week_item(row: sqlite3.Row) -> WeekItem:
+    return WeekItem(
+        cycle_id=row["cycle_id"],
+        week_no=row["week_no"],
+        kind=row["kind"],
+        weekday=row["weekday"],
+        start_min=row["start_min"],
+        duration_min=row["duration_min"],
+        layer=row["layer"],
+        tactic_id=row["tactic_id"],
+        block_id=row["block_id"],
+        title=row["title"],
+        skipped=bool(row["skipped"]),
+        custom=bool(row["custom"]),
+        orig_weekday=row["orig_weekday"],
+        orig_start_min=row["orig_start_min"],
+        plan_item_id=row["plan_item_id"],
+        id=row["id"],
+    )
 
 
 DEFAULT_ALERT_MINUTES = 10
@@ -121,6 +138,11 @@ class Repo:
         """When clash suggestions may start and must end, in minutes after midnight."""
         start, end = DEFAULT_DAY_WINDOW
         return int(self.get_setting("day_start", str(start))), int(self.get_setting("day_end", str(end)))
+
+    @property
+    def import_urls(self) -> list[str]:
+        """Other calendars' ICS links, shown while planning (see twy.calendars)."""
+        return [u for u in (self.get_setting("import_urls") or "").splitlines() if u]
 
     @property
     def calendar_token(self) -> str:
@@ -190,7 +212,7 @@ class Repo:
             self.conn.execute("UPDATE cycle SET status = ? WHERE id = ?", (status, cycle_id))
 
     def copy_plan(self, from_cycle_id: int, to_cycle_id: int) -> None:
-        """Copy goals, tactics, blocks and their slots (not results) into another cycle."""
+        """Copy goals, tactics, blocks and their slots (not results or week plans) into another cycle."""
         with self.conn:
             for goal in self.list_goals(from_cycle_id):
                 cur = self.conn.execute(
@@ -198,19 +220,20 @@ class Repo:
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (to_cycle_id, goal.position, goal.title, goal.why, goal.unit, goal.baseline, goal.target),
                 )
-                for t in self.list_tactics_for_goal(goal.id):
-                    tcur = self.conn.execute(
-                        "INSERT INTO tactic (goal_id, position, title, times_per_week, start_week, end_week) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        (cur.lastrowid, t.position, t.title, t.times_per_week, t.start_week, t.end_week),
-                    )
-                    self._insert_slots("tactic_id", tcur.lastrowid, self.list_slots("tactic_id", t.id))
+                self.conn.executemany(
+                    "INSERT INTO tactic (goal_id, position, title, times_per_week, start_week, end_week) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        (cur.lastrowid, t.position, t.title, t.times_per_week, t.start_week, t.end_week)
+                        for t in self.list_tactics_for_goal(goal.id)
+                    ],
+                )
             for b in self.list_blocks(from_cycle_id):
                 bcur = self.conn.execute(
                     "INSERT INTO block (cycle_id, position, title, kind) VALUES (?, ?, ?, ?)",
                     (to_cycle_id, b.position, b.title, b.kind),
                 )
-                self._insert_slots("block_id", bcur.lastrowid, b.slots)
+                self._insert_slots(bcur.lastrowid, b.slots)
 
     # -- goals ------------------------------------------------------------------
 
@@ -273,8 +296,7 @@ class Repo:
             raise KeyError(tactic_id)
         return _tactic(row)
 
-    def save_tactic(self, tactic: Tactic, slots: list[Slot] | None = None) -> Tactic:
-        """Insert or update a tactic and, if `slots` is given, replace its slots, in one transaction."""
+    def save_tactic(self, tactic: Tactic) -> Tactic:
         fields = (tactic.title, tactic.times_per_week, tactic.start_week, tactic.end_week)
         with self.conn:
             if tactic.id is None:
@@ -292,9 +314,6 @@ class Repo:
                     "UPDATE tactic SET title = ?, times_per_week = ?, start_week = ?, end_week = ? WHERE id = ?",
                     (*fields, tactic.id),
                 )
-            if slots is not None:
-                self.conn.execute("DELETE FROM slot WHERE tactic_id = ?", (tactic.id,))
-                self._insert_slots("tactic_id", tactic.id, slots)
         return tactic
 
     def delete_tactic(self, tactic_id: int) -> None:
@@ -307,35 +326,16 @@ class Repo:
 
     # -- slots ------------------------------------------------------------------
 
-    def list_slots(self, owner: str, owner_id: int) -> list[Slot]:
-        """Slots of one tactic or block; `owner` is "tactic_id" or "block_id"."""
-        rows = self.conn.execute(
-            f"SELECT * FROM slot WHERE {_owner(owner)} = ? ORDER BY weekday, start_min, id", (owner_id,)
-        )
+    def list_slots(self, block_id: int) -> list[Slot]:
+        """A block's weekly slots. (Tactics have no weekly times: they're planned week by week.)"""
+        rows = self.conn.execute("SELECT * FROM slot WHERE block_id = ? ORDER BY weekday, start_min, id", (block_id,))
         return [_slot(r) for r in rows]
 
-    def tactic_slots(self, cycle_id: int) -> dict[int, list[Slot]]:
-        """Slots of every tactic in a cycle, keyed by tactic id (tactics without slots are absent)."""
-        rows = self.conn.execute(
-            "SELECT s.* FROM slot s JOIN tactic t ON t.id = s.tactic_id JOIN goal g ON g.id = t.goal_id "
-            "WHERE g.cycle_id = ? ORDER BY s.weekday, s.start_min, s.id",
-            (cycle_id,),
-        )
-        slots: dict[int, list[Slot]] = {}
-        for r in rows:
-            slots.setdefault(r["tactic_id"], []).append(_slot(r))
-        return slots
-
-    def replace_tactic_slots(self, tactic_id: int, slots: list[Slot]) -> None:
-        with self.conn:
-            self.conn.execute("DELETE FROM slot WHERE tactic_id = ?", (tactic_id,))
-            self._insert_slots("tactic_id", tactic_id, slots)
-
-    def _insert_slots(self, owner: str, owner_id: int, slots: list[Slot]) -> None:
+    def _insert_slots(self, block_id: int, slots: list[Slot]) -> None:
         """Insert inside the caller's transaction."""
         self.conn.executemany(
-            f"INSERT INTO slot ({_owner(owner)}, weekday, start_min, duration_min) VALUES (?, ?, ?, ?)",
-            [(owner_id, s.weekday, s.start_min, s.duration_min) for s in slots],
+            "INSERT INTO slot (block_id, weekday, start_min, duration_min) VALUES (?, ?, ?, ?)",
+            [(block_id, s.weekday, s.start_min, s.duration_min) for s in slots],
         )
 
     # -- blocks -----------------------------------------------------------------
@@ -357,7 +357,7 @@ class Repo:
             title=row["title"],
             kind=row["kind"],
             position=row["position"],
-            slots=self.list_slots("block_id", row["id"]),
+            slots=self.list_slots(row["id"]),
         )
 
     def save_block(self, block: Block) -> Block:
@@ -377,7 +377,7 @@ class Repo:
                     "UPDATE block SET title = ?, kind = ? WHERE id = ?", (block.title, block.kind, block.id)
                 )
                 self.conn.execute("DELETE FROM slot WHERE block_id = ?", (block.id,))
-            self._insert_slots("block_id", block.id, block.slots)
+            self._insert_slots(block.id, block.slots)
         return block
 
     def delete_block(self, block_id: int) -> None:
@@ -398,6 +398,132 @@ class Repo:
         with self.conn:
             for pos, i in enumerate(ids):
                 self.conn.execute(f"UPDATE {table} SET position = ? WHERE id = ?", (pos, i))
+
+    # -- week plans -------------------------------------------------------------
+
+    def week_items(self, cycle_id: int, week_no: int, layer: str = "plan") -> list[WeekItem]:
+        """One layer of a week, in time order. Titles follow the tactic or block while it exists."""
+        rows = self.conn.execute(
+            "SELECT w.*, COALESCE(t.title, b.title, w.title) AS live_title FROM week_item w "
+            "LEFT JOIN tactic t ON t.id = w.tactic_id LEFT JOIN block b ON b.id = w.block_id "
+            "WHERE w.cycle_id = ? AND w.week_no = ? AND w.layer = ? ORDER BY w.weekday, w.start_min, w.id",
+            (cycle_id, week_no, layer),
+        )
+        return [replace(_week_item(r), title=r["live_title"]) for r in rows]
+
+    def replace_week_items(self, cycle_id: int, week_no: int, layer: str, items: list[WeekItem]) -> None:
+        """Replace one layer of a week and mark the week planned (plan) or recorded (actual)."""
+        stamp = "planned_at" if layer == "plan" else "recorded_at"
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM week_item WHERE cycle_id = ? AND week_no = ? AND layer = ?", (cycle_id, week_no, layer)
+            )
+            self._insert_week_items(cycle_id, week_no, layer, items)
+            self.conn.execute(
+                f"INSERT INTO week_status (cycle_id, week_no, {stamp}) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                f"ON CONFLICT(cycle_id, week_no) DO UPDATE SET {stamp} = CURRENT_TIMESTAMP",
+                (cycle_id, week_no),
+            )
+
+    def _insert_week_items(self, cycle_id: int, week_no: int, layer: str, items: list[WeekItem]) -> None:
+        """Insert inside the caller's transaction. A blank title is filled in from the tactic or block."""
+        self.conn.executemany(
+            "INSERT INTO week_item (cycle_id, week_no, layer, kind, tactic_id, block_id, plan_item_id, title, "
+            "weekday, start_min, duration_min, skipped, custom, orig_weekday, orig_start_min) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), (SELECT title FROM tactic WHERE id = ?), "
+            "(SELECT title FROM block WHERE id = ?), ''), ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    cycle_id,
+                    week_no,
+                    layer,
+                    i.kind,
+                    i.tactic_id,
+                    i.block_id,
+                    i.plan_item_id,
+                    i.title,
+                    i.tactic_id,
+                    i.block_id,
+                    i.weekday,
+                    i.start_min,
+                    i.duration_min,
+                    int(i.skipped),
+                    int(i.custom),
+                    i.orig_weekday,
+                    i.orig_start_min,
+                )
+                for i in items
+            ],
+        )
+
+    def planned_weeks(self, cycle_id: int) -> set[int]:
+        rows = self.conn.execute(
+            "SELECT week_no FROM week_status WHERE cycle_id = ? AND planned_at IS NOT NULL", (cycle_id,)
+        )
+        return {r["week_no"] for r in rows}
+
+    def recorded_weeks(self, cycle_id: int) -> set[int]:
+        rows = self.conn.execute(
+            "SELECT week_no FROM week_status WHERE cycle_id = ? AND recorded_at IS NOT NULL", (cycle_id,)
+        )
+        return {r["week_no"] for r in rows}
+
+    def clear_actual(self, cycle_id: int, week_no: int) -> None:
+        """Forget what was recorded for a week, so it reads as having gone to plan."""
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM week_item WHERE cycle_id = ? AND week_no = ? AND layer = 'actual'", (cycle_id, week_no)
+            )
+            self.conn.execute(
+                "UPDATE week_status SET recorded_at = NULL WHERE cycle_id = ? AND week_no = ?", (cycle_id, week_no)
+            )
+
+    def resync_block_rows(self, block: Block, weeks: list[int]) -> None:
+        """After a block's weekly slots change, refresh its occurrences in the given (planned) weeks.
+
+        Occurrences skipped or moved for one week are kept, and their slot isn't added back.
+        """
+        with self.conn:
+            for week_no in weeks:
+                self.conn.execute(
+                    "DELETE FROM week_item WHERE cycle_id = ? AND week_no = ? AND layer = 'plan' "
+                    "AND block_id = ? AND custom = 0",
+                    (block.cycle_id, week_no, block.id),
+                )
+                kept = {
+                    (r["orig_weekday"], r["orig_start_min"])
+                    for r in self.conn.execute(
+                        "SELECT orig_weekday, orig_start_min FROM week_item "
+                        "WHERE cycle_id = ? AND week_no = ? AND layer = 'plan' AND block_id = ?",
+                        (block.cycle_id, week_no, block.id),
+                    )
+                }
+                fresh = [
+                    WeekItem(
+                        block.cycle_id,
+                        week_no,
+                        "block",
+                        s.weekday,
+                        s.start_min,
+                        s.duration_min,
+                        block_id=block.id,
+                        title=block.title,
+                        orig_weekday=s.weekday,
+                        orig_start_min=s.start_min,
+                    )
+                    for s in block.slots
+                    if (s.weekday, s.start_min) not in kept
+                ]
+                self._insert_week_items(block.cycle_id, week_no, "plan", fresh)
+
+    def prune_plan_rows(self, cycle_id: int, kind: str, owner_id: int, weeks: list[int]) -> None:
+        """Remove a tactic's or block's planned rows from the given weeks (e.g. ones it no longer runs in)."""
+        column = {"tactic": "tactic_id", "block": "block_id"}[kind]
+        with self.conn:
+            self.conn.executemany(
+                f"DELETE FROM week_item WHERE cycle_id = ? AND week_no = ? AND layer = 'plan' AND {column} = ?",
+                [(cycle_id, w, owner_id) for w in weeks],
+            )
 
     # -- weekly reviews ---------------------------------------------------------
 

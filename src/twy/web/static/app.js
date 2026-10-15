@@ -78,8 +78,10 @@
   });
 
   // Calendar clashes: the server checks (one rule, in Python) and we show the answer under each row.
+  // One check covers the whole form, so a week's plan compares every tactic's rows with each other.
   document.querySelectorAll("[data-check-url]").forEach((box) => {
     const form = box.closest("form");
+    const rows = () => form.querySelectorAll("[data-slot-rows] > .slot-row");
     const el = (tag, className, text) => {
       const node = document.createElement(tag);
       node.className = className;
@@ -115,7 +117,10 @@
         return; // offline, logged out or restarting: hints are optional
       }
       if (ticket !== latest) return; // an older answer arriving after a newer one
-      box.querySelectorAll("[data-slot-rows] > .slot-row").forEach((row, i) => show(row, data.rows[i]));
+      rows().forEach((row, i) => show(row, data.rows[i]));
+      Object.entries(data.placed || {}).forEach(([id, n]) => {
+        form.querySelectorAll(`[data-placed-for="${id}"]`).forEach((count) => (count.textContent = n));
+      });
     };
     const soon = () => {
       clearTimeout(timer);
@@ -123,7 +128,7 @@
     };
     form.addEventListener("input", soon);
     form.addEventListener("change", soon);
-    box.addEventListener("click", (e) => {
+    form.addEventListener("click", (e) => {
       const move = e.target.closest("[data-move-to]");
       if (!move) return;
       move.closest(".slot-row").querySelector('[name="slot_time"]').value = move.dataset.moveTo;

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_slots.html" import unplanned_banner with context %}
 {% block title %}{{ cycle.name }}{% endblock %}
 {% block content %}
 {% set review_url = url_for('web.review_default', cycle_id=cycle.id) %}
@@ -12,6 +13,7 @@
 {% elif status.banner == "week13" %}
 <div class="banner info">Week 12 is done. <a href="{{ url_for('web.week13', cycle_id=cycle.id) }}">Do your Week 13 review</a></div>
 {% endif %}
+{{ unplanned_banner(cycle, unplanned) }}
 
 {% if today_rows is not none %}
 {% set logged = today_rows|selectattr("today")|list|length %}

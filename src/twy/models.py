@@ -96,6 +96,42 @@ class Block:
     slots: list[Slot] = field(default_factory=list)
 
 
+WEEK_LAYERS = ("plan", "actual")
+
+
+@dataclass
+class WeekItem:
+    """One session in a week: a tactic's planned time, a block occurrence or a one-off event.
+
+    The "plan" layer is what you planned; after the week, the "actual" layer records what happened.
+    """
+
+    cycle_id: int
+    week_no: int
+    kind: str  # tactic | block | event
+    weekday: int
+    start_min: int
+    duration_min: int
+    layer: str = "plan"
+    tactic_id: int | None = None
+    block_id: int | None = None
+    title: str = ""
+    skipped: bool = False
+    custom: bool = False
+    orig_weekday: int | None = None  # block rows: the weekly slot they came from
+    orig_start_min: int | None = None
+    plan_item_id: int | None = None
+    id: int | None = None
+
+    @property
+    def slot(self) -> Slot:
+        return Slot(self.weekday, self.start_min, self.duration_min)
+
+    @property
+    def end_min(self) -> int:
+        return self.start_min + self.duration_min
+
+
 @dataclass
 class WeekEntry:
     """One tactic's line on a reviewed week's scorecard: a snapshot that outlives the tactic."""
