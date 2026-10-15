@@ -56,7 +56,6 @@
       {% if read_only %}<div>{% else %}<a class="row-link" href="{{ url_for('web.tactic_edit', cycle_id=cycle.id, tactic_id=t.id) }}" aria-label="Edit tactic: {{ t.title }}">{% endif %}
         <span>{{ t.title }}</span>
         <span class="muted small">{{ t.times_per_week }}×/wk · weeks {{ t.start_week }}–{{ t.end_week }}</span>
-        {% if slots.get(t.id) %}<span class="slot-labels">{{ slots[t.id]|map(attribute="label")|join(" · ") }}</span>{% endif %}
       {% if read_only %}</div>{% else %}</a>{{ move_buttons('web.tactic_move', t.title, tactic_id=t.id) }}{% endif %}
     </li>
     {% else %}

@@ -1,14 +1,15 @@
-"""Calendar clashes between weekly slots, and free times to move a clashing slot to. Pure functions.
+"""Calendar clashes between slots, and free times to move a clashing slot to. Pure functions.
 
-Slots are weekly templates, so each pair is checked once rather than week by week: a clash
+Block slots are weekly templates, so each pair is checked once rather than week by week: a clash
 needs the same weekday, overlapping times, and at least one week in which both items are active.
+A week's plan is checked the same way, with every item active in just that week.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from twy.domain.dates import REVIEW_WEEK
-from twy.models import WEEKDAY_SHORT, Block, Slot, Tactic
+from twy.models import WEEKDAY_SHORT, Block, Slot, WeekItem
 
 Weeks = tuple[int, int]  # first and last cycle week, inclusive
 
@@ -22,7 +23,7 @@ class Placed:
     """A slot with its owner and the weeks that owner is active in."""
 
     title: str
-    owner: str  # "tactic" | "block"
+    owner: str  # "tactic" | "block" | "event"
     owner_id: int | None
     weeks: Weeks
     slot: Slot
@@ -66,23 +67,18 @@ def find_clashes(placed: list[Placed]) -> list[Clash]:
     return clashes
 
 
-def placed_for_cycle(
-    tactics: Iterable[Tactic],
-    tactic_slots: Mapping[int, list[Slot]],
-    blocks: Iterable[Block],
-    skip: tuple[str, int | None] | None = None,
-) -> list[Placed]:
-    """Every saved slot in a cycle, except those of `skip` = (owner, id): the item being edited."""
-    placed = [
-        Placed(t.title, "tactic", t.id, (t.start_week, t.end_week), s)
-        for t in tactics
-        if ("tactic", t.id) != skip
-        for s in tactic_slots.get(t.id, [])
+def placed_for_cycle(blocks: Iterable[Block], skip: int | None = None) -> list[Placed]:
+    """Every block's weekly slots, except those of block `skip`: the one being edited."""
+    return [Placed(b.title, "block", b.id, (1, REVIEW_WEEK), s) for b in blocks if b.id != skip for s in b.slots]
+
+
+def placed_for_week(week_no: int, items: Iterable[WeekItem]) -> list[Placed]:
+    """A week's items (skipped block occurrences left out), active in that week only."""
+    return [
+        Placed(i.title, i.kind, i.tactic_id if i.kind == "tactic" else i.block_id, (week_no, week_no), i.slot)
+        for i in items
+        if not i.skipped
     ]
-    placed += [
-        Placed(b.title, "block", b.id, (1, REVIEW_WEEK), s) for b in blocks if ("block", b.id) != skip for s in b.slots
-    ]
-    return placed
 
 
 @dataclass

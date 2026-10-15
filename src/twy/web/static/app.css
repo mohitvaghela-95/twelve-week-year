@@ -540,6 +540,15 @@ body.onboarding { padding-bottom: 24px; }
 .copy-row { display: flex; gap: 8px; }
 .copy-row input { font-size: 16px; }
 
+/* Week planning: one fieldset per tactic, and what's already on, day by day. */
+.plan-group + .plan-group { border-top: 1px solid var(--border); padding-top: 12px; }
+.plan-group legend { font-weight: 700; }
+.plan-group legend + p { margin: 0; }
+.busy-day + .busy-day { margin-top: 12px; }
+.busy-day h3 { margin: 0; font-size: 0.95rem; }
+.busy-day.today h3 { color: var(--accent); }
+.busy-day p { margin: 4px 0 0; }
+
 .kind-tactic { --kind: var(--accent); }
 .kind-admin { --kind: #868e96; }
 .kind-chores { --kind: #e67700; }

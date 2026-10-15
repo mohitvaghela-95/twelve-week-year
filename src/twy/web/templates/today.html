@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import reflection_fields %}
+{% from "_slots.html" import unplanned_banner with context %}
 {% block body_class %}wide{% endblock %}
 {% block title %}{{ "Today" if day is none or day == today else day.strftime("%a %d %b") }} · {{ cycle.name }}{% endblock %}
 {% macro log_button(t, delta) -%}
@@ -25,6 +26,7 @@
   {% endif %}
 </section>
 {% else %}
+{{ unplanned_banner(cycle, unplanned) }}
 <nav class="weekpicker" aria-label="Day">
   {% for d in days %}
   {% set label = WEEKDAY_SHORT[d.weekday()] ~ " " ~ d.day %}

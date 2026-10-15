@@ -1,10 +1,24 @@
 import sqlite3
+from dataclasses import replace
 from datetime import date
 
 import pytest
 
 from twy.db import MIGRATIONS, connect, migrate
-from twy.models import Answer, Block, CycleReview, DayReview, Goal, Prompt, Slot, Tactic, WeekEntry, WeekReview
+from twy.models import (
+    Answer,
+    Block,
+    CycleReview,
+    DayReview,
+    Goal,
+    Prompt,
+    Slot,
+    Tactic,
+    WeekEntry,
+    WeekItem,
+    WeekReview,
+)
+from twy.repo import Repo
 
 MON = date(2026, 10, 5)
 
@@ -120,29 +134,97 @@ def test_migration_upgrades_a_v1_database(tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM slot").fetchone()[0] == 0
 
 
-def test_slots_blocks_and_copy_plan(repo):
+def test_migration_v5_drops_tactic_slots_and_keeps_block_slots(tmp_path):
+    path = tmp_path / "v4.db"
+    old = sqlite3.connect(path)
+    old.execute("PRAGMA foreign_keys = ON")
+    for script in MIGRATIONS[:4]:
+        old.executescript(script)
+    old.execute("PRAGMA user_version = 4")
+    old.executescript(
+        """
+        INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0);
+        INSERT INTO goal (id, cycle_id, title) VALUES (1, 1, 'Fit');
+        INSERT INTO tactic (id, goal_id, title, times_per_week) VALUES (1, 1, 'Run', 3);
+        INSERT INTO block (id, cycle_id, title, kind) VALUES (1, 1, 'Admin', 'admin');
+        INSERT INTO slot (tactic_id, weekday, start_min, duration_min) VALUES (1, 0, 420, 60);
+        INSERT INTO slot (block_id, weekday, start_min, duration_min) VALUES (1, 4, 960, 30);
+        """
+    )
+    old.commit()
+    old.close()
+    repo = Repo(connect(path))
+    assert repo.conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
+    assert [s.label for s in repo.get_block(1).slots] == ["Fri 16:00–16:30"]
+    assert repo.conn.execute("SELECT COUNT(*) FROM slot").fetchone()[0] == 1
+    assert repo.planned_weeks(1) == set()
+
+
+def test_blocks_and_copy_plan(repo):
     cycle = repo.create_cycle("Q4", MON, 0)
     goal = repo.save_goal(Goal(id=None, cycle_id=cycle.id, title="AI engineer offer"))
-    study = repo.save_tactic(
-        Tactic(id=None, goal_id=goal.id, title="Study", times_per_week=5), [Slot(1, 420, 60), Slot(0, 420, 60)]
-    )
-    assert [s.label for s in repo.tactic_slots(cycle.id)[study.id]] == ["Mon 07:00–08:00", "Tue 07:00–08:00"]
+    repo.save_tactic(Tactic(id=None, goal_id=goal.id, title="Study", times_per_week=5))
 
     block = repo.save_block(Block(id=None, cycle_id=cycle.id, title="Admin", kind="admin", slots=[Slot(4, 960, 30)]))
     block.slots = [Slot(5, 600, 60)]
     repo.save_block(block)
     assert [s.label for s in repo.get_block(block.id).slots] == ["Sat 10:00–11:00"]
+    repo.replace_week_items(cycle.id, 1, "plan", [WeekItem(cycle.id, 1, "block", 5, 600, 60, block_id=block.id)])
 
     nxt = repo.create_cycle("Q1", date(2027, 1, 4), 0)
     repo.copy_plan(cycle.id, nxt.id)
-    copied = repo.list_tactics(nxt.id)[0]
-    assert len(repo.list_slots("tactic_id", copied.id)) == 2
+    assert [t.title for t in repo.list_tactics(nxt.id)] == ["Study"]
     assert [(b.title, b.kind, len(b.slots)) for b in repo.list_blocks(nxt.id)] == [("Admin", "admin", 1)]
+    assert repo.planned_weeks(nxt.id) == set()  # week plans aren't copied
 
-    repo.delete_tactic(study.id)
-    assert repo.tactic_slots(cycle.id) == {}
     repo.delete_block(block.id)
-    assert repo.conn.execute("SELECT COUNT(*) FROM slot WHERE block_id IS NOT NULL").fetchone()[0] == 1  # the copy's
+    assert repo.conn.execute("SELECT COUNT(*) FROM slot").fetchone()[0] == 1  # the copy's
+
+
+def test_week_items_round_trip(repo):
+    cycle, _goal, run, _log = make_plan(repo)
+    admin = repo.save_block(Block(id=None, cycle_id=cycle.id, title="Admin", kind="admin", slots=[Slot(4, 960, 30)]))
+    items = [
+        WeekItem(cycle.id, 2, "tactic", 2, 1080, 45, tactic_id=run.id),
+        WeekItem(cycle.id, 2, "tactic", 0, 420, 30, tactic_id=run.id),
+        WeekItem(cycle.id, 2, "block", 4, 960, 30, block_id=admin.id, orig_weekday=4, orig_start_min=960),
+    ]
+    assert repo.planned_weeks(cycle.id) == set()
+    repo.replace_week_items(cycle.id, 2, "plan", items)
+    assert repo.planned_weeks(cycle.id) == {2}
+    saved = repo.week_items(cycle.id, 2)
+    assert [(i.title, i.weekday, i.start_min) for i in saved] == [("Run", 0, 420), ("Run", 2, 1080), ("Admin", 4, 960)]
+    assert repo.week_items(cycle.id, 2, "actual") == []
+
+    # An empty plan still counts as planned; replacing a week leaves other weeks alone.
+    repo.replace_week_items(cycle.id, 3, "plan", [])
+    assert repo.planned_weeks(cycle.id) == {2, 3}
+
+    # Titles follow the tactic while it exists, and keep the snapshot once it's deleted.
+    run.title = "Run 5k"
+    repo.save_tactic(run)
+    assert repo.week_items(cycle.id, 2)[0].title == "Run 5k"
+    repo.delete_tactic(run.id)
+    orphan = repo.week_items(cycle.id, 2)[0]
+    assert (orphan.tactic_id, orphan.title) == (None, "Run")
+
+    repo.prune_plan_rows(cycle.id, "block", admin.id, [2])
+    assert [i.kind for i in repo.week_items(cycle.id, 2)] == ["tactic", "tactic"]
+
+
+def test_resync_block_rows_keeps_one_week_changes(repo):
+    cycle = repo.create_cycle("Q4", MON, 0)
+    admin = repo.save_block(Block(id=None, cycle_id=cycle.id, title="Admin", kind="admin", slots=[Slot(0, 960, 30)]))
+    template = WeekItem(cycle.id, 1, "block", 0, 960, 30, block_id=admin.id, orig_weekday=0, orig_start_min=960)
+    moved = replace(template, weekday=1, custom=True)
+    repo.replace_week_items(cycle.id, 1, "plan", [moved])
+    repo.replace_week_items(cycle.id, 2, "plan", [template])
+
+    admin.slots = [Slot(0, 960, 30), Slot(3, 960, 30)]
+    repo.save_block(admin)
+    repo.resync_block_rows(admin, [1, 2])
+    assert [(i.weekday, i.custom) for i in repo.week_items(cycle.id, 1)] == [(1, True), (3, False)]
+    assert [(i.weekday, i.custom) for i in repo.week_items(cycle.id, 2)] == [(0, False), (3, False)]
 
 
 def test_calendar_token_is_stable_until_rotated(repo):

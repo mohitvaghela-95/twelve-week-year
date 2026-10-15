@@ -10,7 +10,7 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 - **Review:** a −/+ done count per tactic (starting from what you logged on Today), lag values and your weekly reflection, with the live score and Save pinned to the bottom. Saving goes straight on to the next week still to score.
 - **Trend:** a 12-week chart with the 85% line, plus weekly notes.
 - **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
-- **Week:** this week's time blocks, as an agenda on the phone and a timeline on desktop. Overlaps are flagged. Tap a session for its details and an Edit button.
+- **Week:** the week's sessions, as an agenda on the phone and a timeline on desktop. Overlaps are flagged. **Plan this week** places your tactics; tap a session for its details and an Edit button.
 - **Cycles, Vision, Settings:** past cycles are read-only. Settings has your reflection prompts, the backup download and the calendar link.
 
 On a phone the tab bar holds Home, Today, Plan, Review and More (Week, Trend, Week 13, Cycles, Vision, Settings). On a wider screen every page is in the sidebar.
@@ -25,11 +25,13 @@ The questions in the daily reflection and in the weekly review are set in Settin
 
 ## Calendar
 
-Give a tactic **calendar times** (day, start time and minutes, e.g. Study: Mon–Fri 07:00 for 60 min). Add **time blocks** on the Plan page for admin, chores, breakout and your weekly review. Blocks belong to the cycle and are copied with "copy previous plan", but they aren't scored.
+Tactics have no fixed times. As in the book, you **plan each week** around whatever else is on: Week → **Plan week N** lists every tactic active that week, and you give each session a day, start time and minutes. You can plan this week and next (week 1 any time before the cycle starts). **Copy week N's times** fills in last week's times to adjust. Sessions you leave unplaced still count, and you log them on Today as usual; the plan only says *when*. Home and Today remind you while this week isn't planned, and about next week from the day of your weekly review block. Saving your last weekly review takes you straight to planning.
 
-While you enter times, twy warns when one overlaps another tactic or block in a week where both run, and offers to **Move to** the nearest free time before or after. Free times are looked for between the hours in Settings → **Suggest times between** (default 06:00–22:00). Clashes never stop a save; any left over are listed on the Plan page.
+Add **time blocks** on the Plan page for admin, chores, breakout and your weekly review. They repeat every week, belong to the cycle and are copied with "copy previous plan", but they aren't scored. Once a week is planned, it keeps its own copy of the blocks, so a past week shows the plan it had.
 
-Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. From the day of your weekly review block, it also shows next week. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
+While you enter times, twy warns when one overlaps another session or block, and offers to **Move to** the nearest free time before or after. Free times are looked for between the hours in Settings → **Suggest times between** (default 06:00–22:00). Clashes never stop a save; any left over are listed on the Plan page.
+
+Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. Next week appears once you've planned it, or from the day of your weekly review block, whichever comes first. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
 
 ## How scoring works
 

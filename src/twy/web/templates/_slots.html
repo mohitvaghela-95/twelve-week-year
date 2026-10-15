@@ -1,13 +1,18 @@
-{#- Weekly slot editor shared by the tactic and block forms. Import "with context" (needs WEEKDAY_SHORT). -#}
-{% macro slot_row(row) -%}
+{#- Slot editors: the block form's weekly times and the week planning page. Import "with context" (needs WEEKDAY_SHORT). -#}
+{% macro slot_row(row, hidden={}) -%}
 <div class="slot-row">
+  {%- for name, value in hidden.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
   <select name="slot_day" aria-label="Day">
     {%- for name in WEEKDAY_SHORT %}<option value="{{ loop.index0 }}" {{ 'selected' if row.day == loop.index0|string }}>{{ name }}</option>{% endfor -%}
   </select>
   <input name="slot_time" type="time" value="{{ row.time }}" aria-label="Start time">
   <input name="slot_minutes" type="number" min="5" max="720" step="5" inputmode="numeric" value="{{ row.minutes }}" aria-label="Length in minutes">
-  <button type="button" class="icon-btn" data-remove-slot data-js-only hidden title="Remove slot" aria-label="Remove slot">✕</button>
+  <button type="button" class="icon-btn" data-remove-slot data-js-only hidden title="Remove time" aria-label="Remove time">✕</button>
 </div>
+{%- endmacro %}
+
+{% macro slot_head() -%}
+<div class="slot-row slot-head muted small" aria-hidden="true"><span>Day</span><span>Start</span><span>Minutes</span><span></span></div>
 {%- endmacro %}
 
 {% macro slot_editor(rows, hint, check_url=None, owner=None, owner_id=None) -%}
@@ -18,11 +23,36 @@
   {%- endif %}
   <legend>Calendar times</legend>
   <p class="muted small">{{ hint }} Clear a row's time to remove it.</p>
-  <div class="slot-row slot-head muted small" aria-hidden="true"><span>Day</span><span>Start</span><span>Minutes</span><span></span></div>
+  {{ slot_head() }}
   <div data-slot-rows>
     {%- for row in rows %}{{ slot_row(row) }}{% endfor -%}
   </div>
   <template data-slot-template>{{ slot_row({"day": rows[-1].day if rows else "0", "time": "", "minutes": "60"}) }}</template>
   <button type="button" class="btn small" data-add-slot data-js-only hidden>+ Add time</button>
 </fieldset>
+{%- endmacro %}
+
+{#- One tactic on the week planning page: its sessions this week. -#}
+{% macro tactic_group(group) -%}
+{% set hidden = {"slot_kind": "tactic", "slot_ref": group.tactic.id} %}
+<fieldset class="slots plan-group" data-slots id="tactic-{{ group.tactic.id }}">
+  <legend>{{ group.tactic.title }}</legend>
+  <p class="muted small">{{ group.goal_title }} · <span data-placed-for="{{ group.tactic.id }}">{{ group.placed }}</span> of {{ group.tactic.times_per_week }} placed</p>
+  {{ slot_head() }}
+  <div data-slot-rows>
+    {%- for row in group.rows %}{{ slot_row(row, hidden) }}{% endfor -%}
+  </div>
+  <template data-slot-template>{{ slot_row({"day": group.rows[-1].day if group.rows else "0", "time": "", "minutes": group.rows[-1].minutes if group.rows else "60"}, hidden) }}</template>
+  <button type="button" class="btn small" data-add-slot data-js-only hidden>+ Add time</button>
+</fieldset>
+{%- endmacro %}
+
+{#- "Week N isn't planned yet", for Home and Today. -#}
+{% macro unplanned_banner(cycle, weeks) -%}
+{% if weeks %}
+<div class="banner warn">
+  {% for w in weeks %}Week {{ w }}{{ " and " if not loop.last }}{% endfor %} {{ "isn't" if weeks|length == 1 else "aren't" }} planned yet.
+  {% for w in weeks %}<a href="{{ url_for('web.week_plan', cycle_id=cycle.id, week_no=w) }}">Plan week {{ w }}</a>{{ " · " if not loop.last }}{% endfor %}
+</div>
+{% endif %}
 {%- endmacro %}

@@ -5,9 +5,10 @@ from twy.domain.conflicts import (
     free_starts,
     pair_warnings,
     placed_for_cycle,
+    placed_for_week,
     shared_weeks,
 )
-from twy.models import Block, Slot, Tactic
+from twy.models import Block, Slot, WeekItem
 
 MON, TUE = 0, 1
 WINDOW = (6 * 60, 22 * 60)
@@ -34,12 +35,25 @@ def test_clashes_only_count_in_shared_weeks():
     assert not find_clashes([early, late])
     assert shared_weeks((1, 12), (7, 12)) == (7, 12)
 
-    tactics = [Tactic(id=1, goal_id=1, title="Gym", start_week=7, end_week=12)]
-    blocks = [Block(id=5, cycle_id=1, title="Admin", kind="admin", slots=[Slot(MON, at(7, 30), 30)])]
-    everything = placed_for_cycle(tactics, {1: [Slot(MON, at(7), 60)]}, blocks)
+    admin = Block(id=5, cycle_id=1, title="Admin", kind="admin", slots=[Slot(MON, at(7, 30), 30)])
+    chores = Block(id=6, cycle_id=1, title="Chores", kind="chores", slots=[Slot(MON, at(7), 60)])
+    everything = placed_for_cycle([admin, chores])
     [clash] = find_clashes(everything)
-    assert clash.weeks == (7, 12)  # blocks run in weeks 1–13
-    assert placed_for_cycle(tactics, {1: [Slot(MON, at(7), 60)]}, blocks, skip=("block", 5)) == everything[:1]
+    assert clash.weeks == (1, 13)  # blocks run in weeks 1–13
+    assert placed_for_cycle([admin, chores], skip=5) == everything[1:]
+
+
+def test_a_week_plan_is_checked_within_its_week():
+    run = WeekItem(1, 3, "tactic", MON, at(7), 60, tactic_id=1, title="Run")
+    admin = WeekItem(1, 3, "block", MON, at(7, 30), 30, block_id=5, title="Admin")
+    skipped = WeekItem(1, 3, "block", MON, at(7), 30, block_id=6, title="Chores", skipped=True)
+    placed_items = placed_for_week(3, [run, admin, skipped])
+    assert [(p.title, p.owner, p.owner_id, p.weeks) for p in placed_items] == [
+        ("Run", "tactic", 1, (3, 3)),
+        ("Admin", "block", 5, (3, 3)),
+    ]
+    [clash] = find_clashes(placed_items)
+    assert clash.weeks == (3, 3)
 
 
 def test_pair_warnings_group_days():

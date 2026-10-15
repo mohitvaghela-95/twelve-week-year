@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Week {{ week_no }} · {{ cycle.name }}{% endblock %}
 {% block body_class %}wide{% endblock %}
+{#- Tactic sessions open this week's plan while it can still change; blocks open their weekly times. -#}
 {% macro edit_url(s) -%}
-{{ url_for('web.tactic_edit', cycle_id=cycle.id, tactic_id=s.owner_id) if s.owner == "tactic" else url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}
+{%- if read_only %}{% elif s.owner == "tactic" %}{{ plan_url if can_plan }}{% elif s.owner_id %}{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}{% endif -%}
 {%- endmacro %}
-{% macro session_tag(s) -%}{{ "a" if not read_only else "div" }}{%- endmacro %}
+{% macro session_tag(s) -%}{{ "a" if edit_url(s) else "div" }}{%- endmacro %}
 {#- With JavaScript, tapping a session shows its details first (#session-pop); the link to edit is the fallback. -#}
 {% macro session_attrs(s) -%}
-{% if not read_only %} href="{{ edit_url(s) }}" data-session data-title="{{ s.title }}"
+{% if edit_url(s) %} href="{{ edit_url(s) }}" data-session data-title="{{ s.title }}"
   data-when="{{ s.day.strftime('%A') }} {{ s.start_min|hhmm }}–{{ s.end_min|hhmm }}"
   data-what="{{ s.context or kinds.get(s.kind, 'Tactic') }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
-  data-edit-label="Edit {{ 'tactic' if s.owner == 'tactic' else 'block' }}"{% endif %}
+  data-edit-label="Edit {{ 'week plan' if s.owner == 'tactic' else 'block' }}"{% endif %}
 {%- endmacro %}
 {% block content %}
 <div class="page-head">
@@ -27,17 +28,25 @@
   {{ session_count }} session{{ "s" if session_count != 1 }} · {{ total_min // 60 }}h{% if total_min % 60 %} {{ total_min % 60 }}m{% endif %} planned
   {% if clashes %}<span class="warn-line"> · ⚠ {{ clashes|length }} overlapping</span>{% endif %}
 </p>
-{% if unscheduled %}
+{% if has_tactics and not planned %}
 <div class="banner warn">
-  Not in the calendar this week:
-  {% for t in unscheduled %}{{ t.title }} ({{ t.times_per_week }}×){{ ", " if not loop.last }}{% endfor %}.
-  <a href="{{ url_for('web.plan', cycle_id=cycle.id) }}">Add times in Plan</a>
+  Week {{ week_no }} isn't planned yet.
+  {% if can_plan %}<a href="{{ plan_url }}">Plan week {{ week_no }}</a>{% endif %}
 </div>
+{% elif short %}
+<div class="banner warn">
+  Not placed this week:
+  {% for t, n in short %}{{ t.title }} ({{ n }} of {{ t.times_per_week }}){{ ", " if not loop.last }}{% endfor %}.
+  {% if can_plan %}<a href="{{ plan_url }}">Edit plan</a>{% endif %}
+</div>
+{% endif %}
+{% if can_plan %}
+<p><a class="btn small{{ ' primary' if not planned }}" href="{{ plan_url }}">{{ "Edit week " ~ week_no ~ "'s plan" if planned else "Plan week " ~ week_no }}</a></p>
 {% endif %}
 {% if not session_count %}
 <section class="card empty">
   <p>Nothing scheduled this week.</p>
-  <p class="muted small">Add calendar times to your tactics, or create time blocks, on the Plan page.</p>
+  <p class="muted small">Plan the week to place your tactics, or add time blocks on the Plan page.</p>
 </section>
 {% else %}
 

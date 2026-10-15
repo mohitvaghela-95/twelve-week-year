@@ -1,7 +1,5 @@
 """Soft warnings based on the book's guidance. They inform; they never block."""
 
-from collections.abc import Mapping
-
 from twy.domain.dates import EXECUTION_WEEKS
 from twy.domain.scoring import planned_items
 from twy.models import Goal, Tactic
@@ -21,7 +19,6 @@ def plan_warnings(
     goals: list[Goal],
     tactics: list[Tactic],
     max_weekly_items: int = DEFAULT_MAX_WEEKLY_ITEMS,
-    slot_counts: Mapping[int, int] | None = None,
 ) -> list[str]:
     warnings: list[str] = []
     if len(goals) > MAX_GOALS:
@@ -41,12 +38,6 @@ def plan_warnings(
             or not (1 <= t.end_week <= EXECUTION_WEEKS)
         ):
             warnings.append(f"Tactic “{t.title}” has an invalid week range ({t.start_week}–{t.end_week}).")
-
-    for t in tactics:
-        slots = (slot_counts or {}).get(t.id, 0)
-        if slots and slots != t.times_per_week:
-            word = "slot" if slots == 1 else "slots"
-            warnings.append(f"“{t.title}” has {slots} {word} in the calendar but is planned {t.times_per_week}×/week.")
 
     heavy = heavy_weeks(tactics, max_weekly_items)
     if heavy:

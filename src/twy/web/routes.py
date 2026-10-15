@@ -84,10 +84,28 @@ from twy.services import (
     week_entries,
     week_of,
     week_progress,
-    week_sessions,
 )
 from twy.web.ics import render_calendar
 from twy.web.svg import score_chart_svg
+from twy.week_plans import (
+    after_block_saved,
+    after_tactic_saved,
+    before_block_deleted,
+    before_tactics_deleted,
+    copy_prev_items,
+    next_week_to_plan,
+    parse_week_rows,
+    plannable_weeks,
+    posted_groups,
+    resolved_items,
+    save_week_plan,
+    shortfall,
+    tactic_groups,
+    unplanned_reminders,
+    week_ended,
+    week_plan_check,
+    week_sessions,
+)
 
 bp = Blueprint("web", __name__)
 
@@ -346,6 +364,7 @@ def dashboard(cycle_id: int):
         current=current if current and current.id != cycle.id else None,
         today_rows=today_rows_,
         week_progress=week_progress(today_rows_) if today_rows_ else None,
+        unplanned=unplanned_reminders(r, cycle, today()),
         tab="home",
     )
 
@@ -392,16 +411,14 @@ def plan(cycle_id: int):
     tactics = r.list_tactics(cycle.id)
     limit = r.max_weekly_items
     heavy = set(heavy_weeks(tactics, limit))
-    slots = r.tactic_slots(cycle.id)
     return render_template(
         "plan.html",
         cycle=cycle,
         goals=[(g, [t for t in tactics if t.goal_id == g.id]) for g in goals],
-        slots=slots,
         blocks=r.list_blocks(cycle.id),
         BLOCK_KINDS=BLOCK_KINDS,
         has_tactics=bool(tactics),
-        warnings=plan_warnings(goals, tactics, limit, {tid: len(s) for tid, s in slots.items()}),
+        warnings=plan_warnings(goals, tactics, limit),
         clashes=plan_clashes(r, cycle),
         load=[(w, planned_items(tactics, w), w in heavy) for w in range(1, EXECUTION_WEEKS + 1)],
         read_only=cycle.status == "closed",
@@ -459,6 +476,7 @@ def goal_edit(cycle_id: int, goal_id: int):
 def goal_delete(cycle_id: int, goal_id: int):
     cycle = writable_cycle(cycle_id)
     goal = load_goal(cycle, goal_id)
+    before_tactics_deleted(repo(), cycle, [t.id for t in repo().list_tactics_for_goal(goal.id)], today())
     repo().delete_goal(goal.id)
     flash(f"Deleted “{goal.title}”.")
     return to_plan(cycle)
@@ -479,17 +497,16 @@ def _tactic_page(cycle: Cycle, goal: Goal, tactic: Tactic):
         "start": str(tactic.start_week),
         "end": str(tactic.end_week),
     }
-    rows = slot_rows(repo().list_slots("tactic_id", tactic.id) if tactic.id else [])
     error = None
     if request.method == "POST":
         fields = {k: request.form.get(k, "") for k in TACTIC_FIELDS}
-        rows = posted_slot_rows()
         try:
-            updated, slots = parse_tactic_form(tactic, fields), posted_slots()
+            updated = parse_tactic_form(tactic, fields)
         except FormError as e:
             error = str(e)
         else:
-            saved = repo().save_tactic(updated, slots)
+            saved = repo().save_tactic(updated)
+            after_tactic_saved(repo(), cycle, saved, today())
             flash("Tactic saved.")
             return to_plan(cycle, f"tactic-{saved.id}")
     return render_template(
@@ -498,7 +515,6 @@ def _tactic_page(cycle: Cycle, goal: Goal, tactic: Tactic):
         goal=goal,
         tactic=tactic,
         fields=fields,
-        slot_rows=rows,
         error=error,
         tab="plan",
     ), 422 if error else 200
@@ -522,6 +538,7 @@ def tactic_edit(cycle_id: int, tactic_id: int):
 def tactic_delete(cycle_id: int, tactic_id: int):
     cycle = writable_cycle(cycle_id)
     tactic, goal = load_tactic(cycle, tactic_id)
+    before_tactics_deleted(repo(), cycle, [tactic.id], today())
     repo().delete_tactic(tactic.id)
     flash(f"Deleted “{tactic.title}”.")
     return to_plan(cycle, f"goal-{goal.id}")
@@ -537,26 +554,18 @@ def tactic_move(cycle_id: int, tactic_id: int):
 
 @bp.post("/c/<int:cycle_id>/schedule/check")
 def schedule_check_json(cycle_id: int):
-    """Live clash hints for the slot editor. Posted like the form itself, so the CSRF check applies."""
+    """Live clash hints for the block form. Posted like the form itself, so the CSRF check applies."""
     cycle = writable_cycle(cycle_id)
     f = request.form
-    owner = f.get("owner", "")
-    owner_id = f.get("owner_id", type=int)
-    if owner == "tactic":
-        try:
-            weeks = (int(f.get("start", "")), int(f.get("end", "")))
-        except ValueError:
-            weeks = (0, 0)
-        if not 1 <= weeks[0] <= weeks[1] <= EXECUTION_WEEKS:
-            # Mid-typing week range: fall back to the saved one.
-            saved = load_tactic(cycle, owner_id)[0] if owner_id else Tactic(id=None, goal_id=0, title="")
-            weeks = (saved.start_week, saved.end_week)
-    elif owner == "block":
-        weeks = (1, REVIEW_WEEK)
-    else:
+    if f.get("owner") != "block":
         abort(400)
     rows = schedule_check(
-        repo(), cycle, owner, owner_id, weeks, f.getlist("slot_day"), f.getlist("slot_time"), f.getlist("slot_minutes")
+        repo(),
+        cycle,
+        f.get("owner_id", type=int),
+        f.getlist("slot_day"),
+        f.getlist("slot_time"),
+        f.getlist("slot_minutes"),
     )
     return jsonify({"rows": rows})
 
@@ -576,6 +585,7 @@ def _block_page(cycle: Cycle, block: Block):
         except FormError as e:
             error = str(e)
         else:
+            after_block_saved(repo(), cycle, saved.id, today())
             flash("Block saved.")
             return to_plan(cycle, f"block-{saved.id}")
     return render_template(
@@ -609,6 +619,7 @@ def block_edit(cycle_id: int, block_id: int):
 def block_delete(cycle_id: int, block_id: int):
     cycle = writable_cycle(cycle_id)
     block = load_block(cycle, block_id)
+    before_block_deleted(repo(), cycle, block.id, today())
     repo().delete_block(block.id)
     flash(f"Deleted “{block.title}”.")
     return to_plan(cycle, "blocks")
@@ -650,11 +661,14 @@ def week(cycle_id: int, week_no: int):
     # Timeline bounds (desktop): whole hours around the week's sessions, at least 07:00–21:00.
     lo = min([s.start_min for s in sessions] + [7 * 60]) // 60 * 60
     hi = -(-max([s.end_min for s in sessions] + [21 * 60]) // 60) * 60
-    slots = r.tactic_slots(cycle.id)
-    unscheduled = (
-        [t for t in r.list_tactics(cycle.id) if t.active_in(week_no) and t.id not in slots]
-        if week_no <= EXECUTION_WEEKS
-        else []
+    planned = week_no in r.planned_weeks(cycle.id)
+    tactics = r.list_tactics(cycle.id) if week_no <= EXECUTION_WEEKS else []
+    tactics = [t for t in tactics if t.active_in(week_no)]
+    can_plan = (
+        cycle.status != "closed"
+        and bool(tactics)
+        and week_no in plannable_weeks(cycle, today())
+        and not week_ended(cycle, week_no, today())
     )
     return render_template(
         "week.html",
@@ -668,7 +682,11 @@ def week(cycle_id: int, week_no: int):
         kinds=BLOCK_KINDS,
         total_min=sum(s.duration_min for s in sessions),
         session_count=len(sessions),
-        unscheduled=unscheduled,
+        planned=planned,
+        has_tactics=bool(tactics),
+        short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned else [],
+        can_plan=can_plan,
+        plan_url=url_for(".week_plan", cycle_id=cycle.id, week_no=week_no),
         lo=lo,
         span=hi - lo,
         hours=list(range(lo, hi, 60)),
@@ -676,6 +694,78 @@ def week(cycle_id: int, week_no: int):
         read_only=cycle.status == "closed",
         tab="week",
     )
+
+
+def plan_page(cycle: Cycle, week_no: int, groups, error: str | None = None, copied: bool = False):
+    r = repo()
+    first, last = week_range(cycle.start_date, week_no)
+    busy = week_sessions(r, cycle, week_no)
+    return render_template(
+        "week_plan.html",
+        cycle=cycle,
+        week_no=week_no,
+        first=first,
+        last=last,
+        groups=groups,
+        days=[
+            (d, [s for s in busy if s.day == d and s.owner != "tactic"])
+            for d in (first + timedelta(days=i) for i in range(7))
+        ],
+        kinds=BLOCK_KINDS,
+        planned=week_no in r.planned_weeks(cycle.id),
+        can_copy=week_no > 1 and week_no - 1 in r.planned_weeks(cycle.id),
+        copied=copied,
+        error=error,
+        today=today(),
+        tab="week",
+    ), 422 if error else 200
+
+
+def plannable_week(cycle_id: int, week_no: int) -> Cycle:
+    """A week whose plan can be edited now: this week or next, not yet over, in an open cycle."""
+    cycle = writable_cycle(cycle_id)
+    if week_no not in plannable_weeks(cycle, today()) or week_ended(cycle, week_no, today()):
+        abort(404)
+    return cycle
+
+
+@bp.route("/c/<int:cycle_id>/week/<int:week_no>/plan", methods=["GET", "POST"])
+def week_plan(cycle_id: int, week_no: int):
+    """Plan one week: place each tactic's sessions around what's already on."""
+    r = repo()
+    cycle = plannable_week(cycle_id, week_no)
+    f = request.form
+    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
+    if request.method == "POST":
+        try:
+            items = parse_week_rows(
+                cycle, week_no, [g.tactic for g in tactic_groups(r, cycle, week_no, [])], f.getlist("slot_kind"), *lists
+            )
+            save_week_plan(r, cycle, week_no, today(), items)
+        except FormError as e:
+            return plan_page(cycle, week_no, posted_groups(r, cycle, week_no, *lists), str(e))
+        short = shortfall([g.tactic for g in tactic_groups(r, cycle, week_no, [])], items)
+        note = "; ".join(f"{t.title} {n} of {t.times_per_week}" for t, n in short)
+        flash(f"Week {week_no} planned." + (f" Not all placed: {note}." if note else ""), "warn" if note else "info")
+        return redirect(url_for(".week", cycle_id=cycle.id, week_no=week_no))
+
+    copied = request.args.get("copy") == "prev"
+    items = copy_prev_items(r, cycle, week_no) if copied else None
+    if copied and items is None:
+        flash(f"Week {week_no - 1} wasn't planned, so there's nothing to copy.", "warn")
+        copied = False
+    if items is None:
+        items = resolved_items(r, cycle, week_no)
+    return plan_page(cycle, week_no, tactic_groups(r, cycle, week_no, items), copied=copied)
+
+
+@bp.post("/c/<int:cycle_id>/week/<int:week_no>/plan/check")
+def week_plan_check_json(cycle_id: int, week_no: int):
+    """Live clash hints and placed counts for the planning form."""
+    cycle = plannable_week(cycle_id, week_no)
+    f = request.form
+    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
+    return jsonify(week_plan_check(repo(), cycle, week_no, *lists))
 
 
 # -- today ------------------------------------------------------------------------
@@ -738,6 +828,7 @@ def day_page(cycle_id: int, iso: str):
         rows=rows,
         progress=week_progress(rows),
         sessions=[s for s in week_sessions(r, cycle, week_no) if s.day == day],
+        unplanned=unplanned_reminders(r, cycle, today()),
         kinds=BLOCK_KINDS,
         existing=existing,
         items=items,
@@ -824,6 +915,11 @@ def review(cycle_id: int, week_no: int):
                 # Catching up: go straight on to the next week still to score.
                 flash(f"Week {week_no} saved: {format_score(score)}. Now week {pending[0]}.")
                 return redirect(url_for(".review", cycle_id=cycle.id, week_no=pending[0]))
+            to_plan_next = next_week_to_plan(r, cycle, today())
+            if to_plan_next is not None:
+                # The book's weekly routine: score last week, then plan this one.
+                flash(f"Week {week_no} saved: {format_score(score)}. Now plan week {to_plan_next}.")
+                return redirect(url_for(".week_plan", cycle_id=cycle.id, week_no=to_plan_next))
             flash(f"Week {week_no} saved: {format_score(score)}.")
             return redirect(url_for(".dashboard", cycle_id=cycle.id))
 
@@ -1060,7 +1156,9 @@ def calendar_feed(token: str):
         abort(404)
     cycles = [c for c in r.list_cycles() if c.status != "closed"]
     planning = {c.id: planning_offset(c, r.list_blocks(c.id)) for c in cycles}
-    sessions = [s for cycle, week_no in feed_weeks(cycles, planning, today()) for s in week_sessions(r, cycle, week_no)]
+    planned = {(c.id, w) for c in cycles for w in r.planned_weeks(c.id)}
+    weeks = feed_weeks(cycles, planning, today(), planned)
+    sessions = [s for cycle, week_no in weeks for s in week_sessions(r, cycle, week_no)]
     body = render_calendar(sessions, r.alert_minutes, datetime.now(UTC))
     return Response(body, mimetype="text/calendar", headers={"Cache-Control": "no-cache"})
 

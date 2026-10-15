@@ -17,7 +17,7 @@ def session(day, title="Study", start=420, minutes=60):
         kind="tactic",
         owner="tactic",
         owner_id=1,
-        slot_id=7,
+        key="tactic-7-w1-1",
         cycle_id=1,
         week_no=1,
         context="AI engineer offer",
@@ -29,7 +29,7 @@ def test_calendar_structure_and_alert():
     assert text.endswith("\r\n") and "\n" not in text.replace("\r\n", "")
     lines = text.split("\r\n")
     assert lines[0] == "BEGIN:VCALENDAR" and lines[-2] == "END:VCALENDAR"
-    assert "UID:tactic-7-20261005@twy" in lines
+    assert "UID:tactic-7-w1-1@twy" in lines
     assert "DTSTART:20261005T060000Z" in lines  # 07:00 BST
     assert "DTEND:20261005T070000Z" in lines
     assert "DESCRIPTION:Goal: AI engineer offer\\nWeek 1 of 12" in lines
