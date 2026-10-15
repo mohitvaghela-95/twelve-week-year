@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import reflection_fields %}
+{% from "_slots.html" import tactic_group, block_group with context %}
 {% block title %}Review · {{ cycle.name }}{% endblock %}
 {% block body_class %}wide{% endblock %}
 {% block content %}
@@ -78,6 +79,27 @@
   </section>
   </div>
   </div>
+
+  {% if what_happened %}
+  <section class="card what-happened" id="what-happened">
+    <div class="card-head">
+      <h2>What happened</h2>
+      {% if what_happened.form %}<a class="small" href="{{ record_url }}">On its own page ›</a>{% else %}<a class="small" href="{{ url_for('web.week', cycle_id=cycle.id, week_no=week_no) }}">Week ›</a>{% endif %}
+    </div>
+    <p class="compare-summary">{{ what_happened.summary }}</p>
+    {% for hint in what_happened.hints %}<p class="warn-line">⚠ {{ hint }}</p>{% endfor %}
+    {% if what_happened.hints %}<p class="muted small">Record the ones that didn't happen below, or fix the counts in the scorecard if they did.</p>{% endif %}
+    {% if what_happened.form %}
+    <details{{ ' open' if record_open }}>
+      <summary>Where each session really happened</summary>
+      <input type="hidden" name="record_present" value="1">
+      <p class="muted small">Change a time if it moved, clear it if it didn't happen, or add one you didn't plan. Saved with the review; it doesn't change your score.</p>
+      {% for group in what_happened.form.tactics %}{{ tactic_group(group, record=True) }}{% endfor %}
+      {% for group in what_happened.form.blocks %}{{ block_group(group, record=True) }}{% endfor %}
+    </details>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <div class="savebar">
     <div class="scorepill band-{{ score|band }}" data-live-score>

@@ -24,6 +24,7 @@ from flask import (
 
 from twy.calendars import MAX_LINKS
 from twy.db import backup_to, connect
+from twy.domain.compare import summary as compare_summary
 from twy.domain.dates import (
     EXECUTION_WEEKS,
     REVIEW_WEEK,
@@ -92,6 +93,7 @@ from twy.web.svg import score_chart_svg
 from twy.week_plans import (
     FORM_FIELDS,
     active_tactics,
+    actual_form,
     after_block_saved,
     after_tactic_saved,
     before_block_deleted,
@@ -101,16 +103,22 @@ from twy.week_plans import (
     imports_for_week,
     next_week_to_plan,
     parse_plan_rows,
+    parse_review_record,
     plan_form,
     plannable_weeks,
     posted_form,
+    recordable,
     resolved_items,
+    review_record,
+    save_actual,
     save_week_plan,
     shortfall,
     unplanned_reminders,
     week_ended,
     week_plan_check,
+    week_record,
     week_sessions,
+    week_view,
 )
 
 bp = Blueprint("web", __name__)
@@ -664,15 +672,18 @@ def week(cycle_id: int, week_no: int):
     cycle = load_cycle(cycle_id)
     if not 1 <= week_no <= REVIEW_WEEK:
         abort(404)
-    sessions = week_sessions(r, cycle, week_no)
+    view = week_view(r, cycle, week_no, today())
+    sessions = view.sessions
     imported = imports_for_week(r, cycle, week_no)
     shown = sorted(sessions + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     first, last = week_range(cycle.start_date, week_no)
     days = [first + timedelta(days=i) for i in range(7)]
     # Timeline bounds (desktop): whole hours around the week's sessions, at least 07:00–21:00.
-    lo = min([s.start_min for s in shown] + [7 * 60]) // 60 * 60
-    hi = -(-max([s.end_min for s in shown] + [21 * 60]) // 60) * 60
-    planned = week_no in r.planned_weeks(cycle.id)
+    ghosts = [g for g, _label in view.ghosts]
+    lo = min([s.start_min for s in shown + ghosts] + [7 * 60]) // 60 * 60
+    hi = -(-max([s.end_min for s in shown + ghosts] + [21 * 60]) // 60) * 60
+    planned = view.planned
+    ended = week_ended(cycle, week_no, today())
     tactics = r.list_tactics(cycle.id) if week_no <= EXECUTION_WEEKS else []
     tactics = [t for t in tactics if t.active_in(week_no)]
     can_plan = (
@@ -695,9 +706,14 @@ def week(cycle_id: int, week_no: int):
         session_count=len(sessions),
         planned=planned,
         has_tactics=bool(tactics),
-        short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned else [],
+        short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned and not ended else [],
         can_plan=can_plan,
         plan_url=url_for(".week_plan", cycle_id=cycle.id, week_no=week_no),
+        ended=ended,
+        view=view,
+        ghosts_by_day={d: [(g, label) for g, label in view.ghosts if g.day == d] for d in days},
+        can_record=recordable(cycle, week_no, today()),
+        record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no),
         lo=lo,
         span=hi - lo,
         hours=list(range(lo, hi, 60)),
@@ -747,6 +763,9 @@ def posted_plan_rows():
 def week_plan(cycle_id: int, week_no: int):
     """Plan one week: place each tactic's sessions around what's already on, and adjust the blocks."""
     r = repo()
+    if request.method == "GET" and recordable(load_cycle(cycle_id), week_no, today()):
+        # The week is over: its plan is kept as it was, and changes now record what happened.
+        return redirect(url_for(".week_actual", cycle_id=cycle_id, week_no=week_no))
     cycle = plannable_week(cycle_id, week_no)
     tactics = active_tactics(r, cycle, week_no)
     if request.method == "POST":
@@ -777,6 +796,73 @@ def week_plan_check_json(cycle_id: int, week_no: int):
     """Live clash hints and placed counts for the planning form."""
     cycle = plannable_week(cycle_id, week_no)
     return jsonify(week_plan_check(repo(), cycle, week_no, posted_plan_rows()))
+
+
+def local_next(default: str) -> str:
+    """Where to go after a form, from `next`, if it's a path on this site."""
+    target = request.values.get("next", "")
+    return target if target.startswith("/") and not target.startswith("//") else default
+
+
+def actual_page(cycle: Cycle, week_no: int, form, record, error: str | None = None):
+    r = repo()
+    first, last = week_range(cycle.start_date, week_no)
+    imported = imports_for_week(r, cycle, week_no)
+    planned = sorted(week_sessions(r, cycle, week_no) + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
+    return render_template(
+        "week_actual.html",
+        cycle=cycle,
+        week_no=week_no,
+        first=first,
+        last=last,
+        form=form,
+        record=record,
+        summary=summary_text(record),
+        days=[(d, [s for s in planned if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        imported=imported,
+        kinds=SESSION_KINDS,
+        next_url=local_next(""),
+        error=error,
+        today=today(),
+        tab="week",
+    ), 422 if error else 200
+
+
+def summary_text(record) -> str | None:
+    if not record.planned:
+        return None
+    return compare_summary(record.changes) if record.recorded else "Not recorded yet, so taken as planned"
+
+
+@bp.route("/c/<int:cycle_id>/week/<int:week_no>/actual", methods=["GET", "POST"])
+def week_actual(cycle_id: int, week_no: int):
+    """After a week: record what actually happened, beside the plan it had."""
+    r = repo()
+    cycle = writable_cycle(cycle_id)
+    if not recordable(cycle, week_no, today()):
+        abort(404)
+    record = week_record(r, cycle, week_no)
+    done = local_next(url_for(".week", cycle_id=cycle.id, week_no=week_no))
+    if request.method == "POST":
+        if request.form.get("action") == "reset":
+            r.clear_actual(cycle.id, week_no)
+            flash(f"Week {week_no} now reads as having gone to plan.")
+            return redirect(done)
+        rows = posted_plan_rows()
+        try:
+            items = parse_plan_rows(
+                cycle, week_no, r.list_tactics(cycle.id), r.list_blocks(cycle.id), rows, record.plan_by_id
+            )
+            changed = save_actual(r, cycle, week_no, today(), items)
+        except FormError as e:
+            return actual_page(cycle, week_no, posted_form(r, cycle, week_no, rows, record.plan_by_id), record, str(e))
+        record = week_record(r, cycle, week_no)
+        if not record.planned:
+            flash(f"Saved what happened in week {week_no}. It wasn't planned, so there's nothing to compare.")
+        else:
+            flash(f"Week {week_no}: {compare_summary(record.changes) if changed else 'went to plan'}.")
+        return redirect(done)
+    return actual_page(cycle, week_no, actual_form(r, cycle, week_no, record), record)
 
 
 # -- today ------------------------------------------------------------------------
@@ -900,11 +986,17 @@ def review(cycle_id: int, week_no: int):
     lag_goals = [g for g in r.list_goals(cycle.id) if g.measurable]
     items = reflection_items(r.list_prompts("weekly", active_only=True), existing.answers if existing else [])
     values = {f"lag-{g.id}": fmt_num(r.goal_progress(g.id).get(week_no)) for g in lag_goals}
+    what_happened = review_record(r, cycle, week_no, today())
     error = None
 
     if request.method == "POST":
         if read_only:
             abort(403, "This cycle is closed and read-only.")
+        # "What happened" is part of the same form: checked first, saved only if it was changed.
+        record_rows = (
+            posted_plan_rows() if what_happened and what_happened.form and "record_present" in request.form else None
+        )
+        happened = None
         done = {}
         for row in rows:
             if row.tactic_id is None:
@@ -921,12 +1013,21 @@ def review(cycle_id: int, week_no: int):
                 progress = {g.id: parse_float(values[f"lag-{g.id}"]) for g in lag_goals}
             except ValueError:
                 raise FormError("Lag measures must be numbers.") from None
+            if record_rows is not None:
+                try:
+                    happened = parse_review_record(r, cycle, week_no, record_rows)
+                except FormError as e:
+                    raise FormError(f"What happened: {e}") from None
         except FormError as e:
             error = str(e)
             for row, entry in zip(rows, entries):
                 row.done = entry.done
+            if record_rows is not None:
+                what_happened.form = posted_form(r, cycle, week_no, record_rows, what_happened.record.plan_by_id)
         else:
             score = save_week(r, cycle, week_no, entries, answers, progress)
+            if happened is not None:
+                save_actual(r, cycle, week_no, today(), happened)
             pending = pending_weeks(r, cycle, today())
             if pending:
                 # Catching up: go straight on to the next week still to score.
@@ -958,6 +1059,10 @@ def review(cycle_id: int, week_no: int):
         error=error,
         read_only=read_only,
         in_progress=current_week(cycle.start_date, today()).week_no,
+        what_happened=what_happened,
+        record_open=bool(error and request.method == "POST" and "record_present" in request.form)
+        or bool(what_happened and (what_happened.hints or what_happened.record.recorded)),
+        record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no, next=request.path),
         tab="review",
     ), 422 if error else 200
 

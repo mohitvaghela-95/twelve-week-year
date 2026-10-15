@@ -7,7 +7,7 @@ import pytest
 
 from twy import calendars
 from twy.db import connect
-from twy.models import Goal, Tactic
+from twy.models import Goal, Tactic, WeekItem
 from twy.repo import Repo
 from twy.web import create_app
 
@@ -546,6 +546,109 @@ def test_plan_around_an_imported_calendar(client, db_path, monkeypatch):
     assert repo.import_urls == [] and "Team offsite" not in client.get(f"{base}/week/1").text
 
 
+def test_record_what_happened_and_compare_on_the_week_page(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Q4", date(2026, 10, 5), 0)  # week 1 ended on Sunday; TODAY is in week 2
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=2))
+    base = f"/c/{cycle.id}"
+    # Week 1 was planned while it was on: Run on Monday and Wednesday at 07:00.
+    plan = [WeekItem(cycle.id, 1, "tactic", day, 420, 30, tactic_id=run.id) for day in (0, 2)]
+    repo.replace_week_items(cycle.id, 1, "plan", plan)
+    mon, wed = (i.id for i in repo.week_items(cycle.id, 1))
+
+    page = client.get(f"{base}/week/1").text
+    assert "Not recorded, so taken as planned." in page and f'href="{base}/week/1/actual"' in page
+    assert client.get(f"{base}/week/2/actual").status_code == 404  # still on
+    page = client.get(f"{base}/week/1/actual").text
+    assert "Planned Mon 07:00" in page and "Planned Wed 07:00" in page and "1 of 2" not in page
+
+    rows = {
+        "slot_kind": ["tactic"] * 3,
+        "slot_ref": [str(run.id)] * 3,
+        "slot_plan": [str(mon), str(wed), ""],
+        "slot_day": ["1", "2", "5"],
+        "slot_time": ["07:00", "", "09:00"],
+        "slot_minutes": ["30"] * 3,
+    }
+    stale = {**rows, "slot_plan": [str(mon), str(mon), ""]}
+    response = post(client, f"{base}/week/1/actual", stale)
+    assert response.status_code == 422 and "Reload the page" in response.text
+    response = post(client, f"{base}/week/1/actual", rows)
+    assert response.location == f"{base}/week/1"
+    page = client.get(f"{base}/week/1").text
+    assert "Week 1: 1 moved, 1 didn&#39;t happen, 1 added." in page  # the flash
+    assert "Against the plan: 1 moved, 1 didn&#39;t happen, 1 added." in page
+    assert "moved from Mon 07:00" in page and 'class="badge">added' in page
+    assert 'class="session ghost kind-tactic"' in page and "Planned · didn&#39;t happen" in page
+    assert "moved to Tue 07:00" in page and "Edit what happened" in page and "2 sessions" in page
+    assert repo.week_items(cycle.id, 1)[0].start_min == 420  # the plan itself is untouched
+
+    # From Review, recording comes back to the review; "Back to as planned" forgets the record.
+    response = post(client, f"{base}/week/1/actual", {**rows, "next": f"{base}/review/1"})
+    assert response.location == f"{base}/review/1"
+    assert post(client, f"{base}/week/1/actual", {**rows, "next": "https://evil.test/"}).location == f"{base}/week/1"
+    assert post(client, f"{base}/week/1/actual", {"action": "reset"}).location == f"{base}/week/1"
+    assert repo.recorded_weeks(cycle.id) == set()
+    assert "Not recorded, so taken as planned." in client.get(f"{base}/week/1").text
+
+    repo.set_cycle_status(cycle.id, "closed")
+    assert client.get(f"{base}/week/1/actual").status_code == 403
+    assert "Record what happened" not in client.get(f"{base}/week/1").text
+
+
+def test_review_shows_and_saves_what_happened(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Q4", date(2026, 10, 5), 0)  # week 1 has ended; TODAY is in week 2
+    repo.set_cycle_status(cycle.id, "active")
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=2))
+    base = f"/c/{cycle.id}"
+    plan = [WeekItem(cycle.id, 1, "tactic", day, 420, 30, tactic_id=run.id) for day in (0, 2)]
+    repo.replace_week_items(cycle.id, 1, "plan", plan)
+    mon, wed = (i.id for i in repo.week_items(cycle.id, 1))
+    repo.log_tactic(run.id, date(2026, 10, 5), 1)  # only Monday's run was logged
+
+    page = client.get(f"{base}/review/1").text
+    assert "What happened" in page and "Not recorded yet, so taken as planned." in page
+    assert "Run: 2 in the calendar, 1 logged on Today. 1 may not have happened." in page
+    assert 'name="record_present"' in page and "Planned Wed 07:00" in page
+    assert f"/week/1/actual?next={base}/review/1" in page
+    week2 = client.get(f"{base}/review/2").text
+    assert "Record what happened once the week is over." in week2 and 'name="record_present"' not in week2
+
+    record = {
+        "record_present": "1",
+        "slot_kind": ["tactic", "tactic"],
+        "slot_ref": [str(run.id)] * 2,
+        "slot_plan": [str(mon), str(wed)],
+        "slot_day": ["0", "2"],
+        "slot_minutes": ["30", "30"],
+    }
+    # A bad row stops the whole save, with the review answers kept.
+    bad = {**record, f"done-{run.id}": "1", "slot_time": ["07:00", "7"]}
+    response = post(client, f"{base}/review/1", bad)
+    assert response.status_code == 422 and "What happened: Run, time 2: use a time like 07:30." in response.text
+    assert repo.reviewed_weeks(cycle.id) == set() and repo.recorded_weeks(cycle.id) == set()
+
+    # Wednesday's run didn't happen: recorded with the review, and the score still comes from the count.
+    response = post(client, f"{base}/review/1", {**record, f"done-{run.id}": "1", "slot_time": ["07:00", ""]})
+    assert response.status_code == 302
+    assert repo.weekly_scores(cycle.id) == {1: 0.5}
+    assert repo.recorded_weeks(cycle.id) == {1}
+    page = client.get(f"{base}/review/1").text
+    assert "Against the plan: 1 didn&#39;t happen." in page and "may not have happened" not in page
+
+    # Saving the review again without touching the section leaves the record as it is.
+    unchanged = {**record, "slot_time": ["07:00", ""], f"done-{run.id}": "2"}
+    assert post(client, f"{base}/review/1", unchanged).status_code == 302
+    assert repo.recorded_weeks(cycle.id) == {1} and repo.weekly_scores(cycle.id) == {1: 1.0}
+
+
 def test_open_plans_follow_tactic_and_block_changes(client, db_path):
     login(client)
     repo = repo_for(db_path)
@@ -557,7 +660,9 @@ def test_open_plans_follow_tactic_and_block_changes(client, db_path):
     rows = {"slot_kind": ["tactic"], "slot_ref": [str(run.id)], "slot_day": ["1"], "slot_minutes": ["30"]}
     for week in (2, 3):
         assert post(client, f"{base}/week/{week}/plan", {**rows, "slot_time": ["07:00"]}).status_code == 302
-    assert client.get(f"{base}/week/1/plan").status_code == 404  # ended weeks can't be re-planned
+    # Ended weeks can't be re-planned: their plan URL goes on to recording what happened.
+    assert client.get(f"{base}/week/1/plan").location == f"{base}/week/1/actual"
+    assert post(client, f"{base}/week/1/plan", {}).status_code == 404
     post(
         client,
         f"{base}/blocks/new",
