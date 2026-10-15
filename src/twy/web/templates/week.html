@@ -14,6 +14,15 @@
   data-what="{{ s.context or kinds.get(s.kind, 'Tactic') }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
   data-edit-label="{{ 'Edit block' if s.owner == 'block' else ('Edit what happened' if ended else 'Edit week plan') }}"{% endif %}
 {%- endmacro %}
+{#- A tactic's sessions with no set time that day: "5× Water" (the count first, so a narrow chip keeps it),
+    and once recorded, what was planned there if it differs. -#}
+{% macro anytime_chip(a) -%}
+{%- set url = plan_url if can_plan else (record_url if can_record) -%}
+{%- set note = " (" ~ a.happened ~ " of " ~ a.planned ~ " planned)" if a.planned is not none else "" -%}
+{%- set tag = "a" if url and not read_only else "span" -%}
+<{{ tag }} class="anytime-chip"{% if tag == "a" %} href="{{ url }}"{% endif %} title="{{ a.label }}{{ note }}{{ ' · ' ~ a.context if a.context }}">
+{%- if a.count > 1 %}<strong>{{ a.count }}×</strong> {% endif %}{{ a.title }}{{ note }}</{{ tag }}>
+{%- endmacro %}
 {% block content %}
 <div class="page-head">
   <h1>Week {{ week_no }}</h1>
@@ -54,7 +63,7 @@
 <p><a class="btn small{{ ' primary' if not planned }}" href="{{ plan_url }}">{{ "Edit week " ~ week_no ~ "'s plan" if planned else "Plan week " ~ week_no }}</a></p>
 {% endif %}
 {% for error in imported.errors %}<p class="muted small import-error">⚠ {{ error }}</p>{% endfor %}
-{% if not session_count and not imported.timed and not imported.all_day and not view.ghosts %}
+{% if not session_count and not imported.timed and not imported.all_day and not view.ghosts and not anytime %}
 <section class="card empty">
   <p>Nothing scheduled this week.</p>
   <p class="muted small">Plan the week to place your tactics, or add time blocks on the Plan page.</p>
@@ -67,13 +76,14 @@
   <section class="card day{{ ' today' if day == today }}">
     <h2>{{ day.strftime("%A") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h2>
     {% for title in imported.all_day.get(day, []) %}<p class="allday small">{{ title }}</p>{% endfor %}
+    {% if anytime.get(day) %}<p class="anytime small">Anytime: {% for a in anytime[day] %}{{ anytime_chip(a) }}{% endfor %}</p>{% endif %}
     {% for s in items %}
     <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
       <span class="what"><strong>{{ s.title }}{% if s.uid in view.badges %} <span class="badge">{{ view.badges[s.uid] }}</span>{% endif %}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
     {% else %}
-    {% if not imported.all_day.get(day) and not ghosts_by_day[day] %}<p class="muted small">Nothing scheduled.</p>{% endif %}
+    {% if not imported.all_day.get(day) and not ghosts_by_day[day] and not anytime.get(day) %}<p class="muted small">Nothing scheduled.</p>{% endif %}
     {% endfor %}
     {% for g, label in ghosts_by_day[day] %}
     <div class="session ghost kind-{{ g.kind }}">
@@ -86,7 +96,8 @@
 </div>
 
 {# Desktop: a 7-day timeline. Positions are percentages of the visible hours. #}
-<div class="timeline{{ ' has-allday' if imported.all_day }}" style="--span: {{ span }}">
+{#- Rows above the hours: imported all-day events, then tactic sessions with no set time. -#}
+<div class="timeline" style="--span: {{ span }}; --tl-top: {{ 32 + (38 if imported.all_day else 0) + (62 if anytime else 0) }}px">
   <div class="tl-hours">
     {% for h in hours %}<span style="top: {{ '%.3f' % ((h - lo) / span * 100) }}%">{{ h|hhmm }}</span>{% endfor %}
   </div>
@@ -94,6 +105,7 @@
   <div class="tl-day{{ ' today' if day == today }}">
     <div class="tl-head">{{ day.strftime("%a") }} <strong>{{ day.day }}</strong></div>
     {% if imported.all_day %}<div class="tl-allday">{% for title in imported.all_day.get(day, []) %}<span class="allday" title="{{ title }}">{{ title }}</span>{% endfor %}</div>{% endif %}
+    {% if anytime %}<div class="tl-anytime">{% for a in anytime.get(day, []) %}{{ anytime_chip(a) }}{% endfor %}</div>{% endif %}
     <div class="tl-body">
       {% for g, label in ghosts_by_day[day] %}
       <div class="tl-item tl-ghost kind-{{ g.kind }}" title="Planned {{ g.start_min|hhmm }}–{{ g.end_min|hhmm }} {{ g.title }} · {{ label }}"

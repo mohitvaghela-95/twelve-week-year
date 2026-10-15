@@ -5,10 +5,10 @@ time zone (TZ), so DST is handled per date and no VTIMEZONE block is needed.
 """
 
 from collections.abc import Iterable
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from twy.domain.dates import EXECUTION_WEEKS
-from twy.domain.schedule import Session
+from twy.domain.schedule import Anytime, Session
 from twy.models import BLOCK_KINDS
 
 CALENDAR_NAME = "12 Week Year"
@@ -50,7 +50,14 @@ def category(s: Session) -> str:
     return {"tactic": "Tactic", "event": "Event"}.get(s.owner) or BLOCK_KINDS.get(s.kind, s.kind)
 
 
-def render_calendar(sessions: Iterable[Session], alert_minutes: int, now: datetime, tz: tzinfo | None = None) -> str:
+def render_calendar(
+    sessions: Iterable[Session],
+    alert_minutes: int,
+    now: datetime,
+    tz: tzinfo | None = None,
+    anytime: Iterable[Anytime] = (),
+) -> str:
+    """Timed sessions as events, and tactic sessions with no set time as one all-day event per tactic per day."""
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -83,5 +90,19 @@ def render_calendar(sessions: Iterable[Session], alert_minutes: int, now: dateti
                 "END:VALARM",
             ]
         lines.append("END:VEVENT")
+    for a in anytime:
+        # All-day and free, with no alarm: a note of what's on that day, not a meeting.
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{a.uid}",
+            f"DTSTAMP:{stamp}",
+            f"DTSTART;VALUE=DATE:{a.day:%Y%m%d}",
+            f"DTEND;VALUE=DATE:{a.day + timedelta(days=1):%Y%m%d}",
+            f"SUMMARY:{escape(a.label)}",
+            f"DESCRIPTION:{escape(f'Goal: {a.context}' + chr(10) + f'Week {a.week_no} of {EXECUTION_WEEKS} · any time')}",
+            "CATEGORIES:Tactic",
+            "TRANSP:TRANSPARENT",
+            "END:VEVENT",
+        ]
     lines.append("END:VCALENDAR")
     return "\r\n".join(fold(line) for line in lines) + "\r\n"

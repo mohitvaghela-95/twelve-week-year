@@ -253,6 +253,40 @@ MIGRATIONS: list[str] = [
         SELECT scope, position, label, kind FROM new
         WHERE NOT EXISTS (SELECT 1 FROM prompt p WHERE p.scope = new.scope AND p.label = new.label);
     """,
+    # v7: a tactic session can be planned for a day without a time ("Wed ×4"). Blocks and events keep
+    # their times. The new table's plan_item_id points at itself, not at week_item: with foreign keys
+    # on, dropping week_item would otherwise clear every link. Renaming it rewrites the reference.
+    """
+    CREATE TABLE week_item_v7 (
+        id             INTEGER PRIMARY KEY,
+        cycle_id       INTEGER NOT NULL REFERENCES cycle(id) ON DELETE CASCADE,
+        week_no        INTEGER NOT NULL CHECK (week_no BETWEEN 1 AND 13),
+        layer          TEXT NOT NULL CHECK (layer IN ('plan', 'actual')),
+        kind           TEXT NOT NULL CHECK (kind IN ('tactic', 'block', 'event')),
+        tactic_id      INTEGER REFERENCES tactic(id) ON DELETE SET NULL,
+        block_id       INTEGER REFERENCES block(id) ON DELETE SET NULL,
+        plan_item_id   INTEGER REFERENCES week_item_v7(id) ON DELETE SET NULL,  -- actual row: the plan row it records
+        title          TEXT NOT NULL DEFAULT '',
+        weekday        INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+        start_min      INTEGER CHECK (start_min BETWEEN 0 AND 1439),  -- NULL: a tactic session with no set time
+        duration_min   INTEGER CHECK (duration_min BETWEEN 5 AND 720),
+        skipped        INTEGER NOT NULL DEFAULT 0,  -- a block occurrence left out this week
+        custom         INTEGER NOT NULL DEFAULT 0,  -- a block occurrence skipped or moved this week
+        orig_weekday   INTEGER,  -- block rows: the weekly slot they came from
+        orig_start_min INTEGER,
+        CHECK ((start_min IS NULL) = (duration_min IS NULL)),
+        CHECK (start_min IS NOT NULL OR kind = 'tactic')
+    );
+    INSERT INTO week_item_v7 SELECT
+        id, cycle_id, week_no, layer, kind, tactic_id, block_id, plan_item_id, title, weekday,
+        start_min, duration_min, skipped, custom, orig_weekday, orig_start_min
+    FROM week_item;
+    DROP TABLE week_item;
+    ALTER TABLE week_item_v7 RENAME TO week_item;
+    CREATE INDEX week_item_week ON week_item (cycle_id, week_no, layer);
+    CREATE INDEX week_item_tactic ON week_item (tactic_id);
+    CREATE INDEX week_item_block ON week_item (block_id);
+    """,
 ]
 
 

@@ -79,15 +79,16 @@ def sessions_from_items(
     goal_titles: Mapping[int, str],
     block_kinds: Mapping[int, str],
 ) -> list[Session]:
-    """Dated sessions for a week's items (skipped block occurrences left out).
+    """Dated sessions for a week's timed items (skipped block occurrences and untimed tactic sessions
+    left out; see anytime_from_items for those).
 
     `goal_titles` maps tactic id → its goal, `block_kinds` block id → kind. Keys stay put when a week
-    is planned or re-saved: a tactic's sessions (and the week's events) are numbered in time order, and a block occurrence is
+    is planned or re-saved: a tactic's timed sessions (and the week's events) are numbered in time order, and a block occurrence is
     named after the weekly slot it came from, so moving it this week updates the same calendar event.
     """
     sessions: list[Session] = []
     nth: Counter = Counter()
-    for item in sorted(items, key=lambda i: (i.weekday, i.start_min)):
+    for item in sorted((i for i in items if i.timed), key=lambda i: (i.weekday, i.start_min)):
         if item.skipped:
             continue
         if item.kind == "tactic":
@@ -104,6 +105,7 @@ def sessions_from_items(
             start = item.start_min if item.orig_start_min is None else item.orig_start_min
             key = f"block-{item.block_id}-{slot_date(cycle, week_no, weekday):%Y%m%d}-{start}"
             key = key if item.block_id else f"item-{item.id}"
+        assert item.start_min is not None and item.duration_min is not None
         sessions.append(
             Session(
                 day=slot_date(cycle, week_no, item.weekday),
@@ -121,6 +123,57 @@ def sessions_from_items(
             )
         )
     return sorted(sessions, key=lambda s: (s.day, s.start_min, s.title))
+
+
+@dataclass(frozen=True)
+class Anytime:
+    """A tactic's untimed sessions on one day of a week: "Drink water ×5" on Wednesday."""
+
+    day: date
+    tactic_id: int | None  # None once the tactic has been deleted
+    title: str
+    count: int
+    cycle_id: int
+    week_no: int
+    context: str = ""  # the goal
+    # After a recorded week, when they differ: how many of the tactic's sessions happened that day
+    # (with a time or not) and how many were planned there.
+    happened: int | None = None
+    planned: int | None = None
+
+    @property
+    def label(self) -> str:
+        return self.title if self.count <= 1 else f"{self.title} ×{self.count}"
+
+    @property
+    def uid(self) -> str:
+        return f"tactic-{self.tactic_id}-w{self.week_no}-d{self.day:%Y%m%d}@twy"
+
+
+def anytime_from_items(
+    cycle: Cycle, week_no: int, items: Iterable[WeekItem], goal_titles: Mapping[int, str]
+) -> list[Anytime]:
+    """A week's untimed tactic sessions, counted per tactic per day, by day then title."""
+    counts: Counter = Counter()
+    titles: dict[tuple[int | None, int], str] = {}
+    for item in items:
+        if item.kind == "tactic" and not item.timed:
+            key = (item.tactic_id, item.weekday)
+            counts[key] += 1
+            titles.setdefault(key, item.title)
+    found = [
+        Anytime(
+            day=slot_date(cycle, week_no, weekday),
+            tactic_id=tactic_id,
+            title=titles[(tactic_id, weekday)],
+            count=n,
+            cycle_id=cycle.id or 0,
+            week_no=week_no,
+            context=goal_titles.get(tactic_id, "") if tactic_id else "",
+        )
+        for (tactic_id, weekday), n in counts.items()
+    ]
+    return sorted(found, key=lambda a: (a.day, a.title))
 
 
 def overlaps(sessions: Iterable[Session]) -> dict[str, list[str]]:

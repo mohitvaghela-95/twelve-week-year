@@ -73,11 +73,11 @@ def placed_for_cycle(blocks: Iterable[Block], skip: int | None = None) -> list[P
 
 
 def placed_for_week(week_no: int, items: Iterable[WeekItem]) -> list[Placed]:
-    """A week's items (skipped block occurrences left out), active in that week only."""
+    """A week's timed items (skipped block occurrences left out), active in that week only."""
     return [
         Placed(i.title, i.kind, i.tactic_id if i.kind == "tactic" else i.block_id, (week_no, week_no), i.slot)
         for i in items
-        if not i.skipped
+        if not i.skipped and i.timed
     ]
 
 

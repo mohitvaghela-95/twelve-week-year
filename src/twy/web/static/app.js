@@ -1,4 +1,5 @@
-// Small progressive enhancements. Every page also works without JavaScript.
+// Small progressive enhancements. Every page also works without JavaScript, except the week grid
+// (planning a week and recording what happened), which needs it to edit its cells.
 (() => {
   const band = (s) => (s === null ? "none" : s >= 0.85 ? "good" : s >= 0.65 ? "warn" : "bad");
   const setBand = (el, s) => {
@@ -79,9 +80,11 @@
 
   // Calendar clashes: the server checks (one rule, in Python) and we show the answer under each row.
   // One check covers the whole form, so a week's plan compares every tactic's rows with each other.
+  // Rows are in the order the form posts them; the week grid's hidden session rows keep their answer
+  // (row.hint) for the grid to show, and hear about it through a "hints" event.
   document.querySelectorAll("[data-check-url]").forEach((box) => {
     const form = box.closest("form");
-    const rows = () => form.querySelectorAll("[data-slot-rows] > .slot-row");
+    const rows = () => form.querySelectorAll("[data-slot-rows] > .slot-row, [data-cell-rows] > [data-session-row]");
     const el = (tag, className, text) => {
       const node = document.createElement(tag);
       node.className = className;
@@ -89,6 +92,10 @@
       return node;
     };
     const show = (row, result) => {
+      if (row.matches("[data-session-row]")) {
+        row.hint = result;
+        return;
+      }
       row.querySelector(".slot-note")?.remove();
       if (!result) return;
       const note = el("div", "slot-note", "");
@@ -118,9 +125,7 @@
       }
       if (ticket !== latest) return; // an older answer arriving after a newer one
       rows().forEach((row, i) => show(row, data.rows[i]));
-      Object.entries(data.placed || {}).forEach(([id, n]) => {
-        form.querySelectorAll(`[data-placed-for="${id}"]`).forEach((count) => (count.textContent = n));
-      });
+      form.dispatchEvent(new Event("hints"));
     };
     const soon = () => {
       clearTimeout(timer);
@@ -130,11 +135,268 @@
     form.addEventListener("change", soon);
     form.addEventListener("click", (e) => {
       const move = e.target.closest("[data-move-to]");
-      if (!move) return;
+      if (!move?.closest(".slot-row")) return;
       move.closest(".slot-row").querySelector('[name="slot_time"]').value = move.dataset.moveTo;
       check();
     });
     check();
+  });
+
+  // Week grid: each cell holds a tactic's sessions on one day as hidden rows (the form posts those).
+  // Tapping a cell opens #cell-pop to change how many there are and give any of them a time.
+  // When recording what happened, adding one first brings back a planned session that was taken
+  // away (so it still counts as kept), and taking one away removes an unplanned one first.
+  document.querySelectorAll("[data-week-grid]").forEach((grid) => {
+    const form = grid.closest("form");
+    const pop = grid.querySelector("#cell-pop");
+    const record = grid.hasAttribute("data-record");
+    const WEEKDAYS = new Set(["0", "1", "2", "3", "4"]);
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const field = (row, name) => row.querySelector(`[name="${name}"]`).value;
+    const rowsOf = (cell) => cell.parentElement.querySelector("[data-cell-rows]");
+    const read = (cell) =>
+      [...rowsOf(cell).children].map((row) => ({
+        time: field(row, "slot_time"),
+        minutes: field(row, "slot_minutes"),
+        plan: field(row, "slot_plan"),
+        hint: row.hint,
+      }));
+    const plannedOf = (cell) => (record ? JSON.parse(cell.dataset.planned || "[]") : []);
+    const tacticOf = (cell) => cell.closest("[data-grid-row]").id.replace("tactic-", "");
+
+    const label = (cell, sessions) => {
+      const times = sessions.map((s) => s.time).filter(Boolean);
+      const parts = [el("span", "n", sessions.length ? String(sessions.length) : "·")];
+      if (times.length) parts.push(el("span", "t", times[0] + (times.length > 1 ? ` +${times.length - 1}` : "")));
+      const planned = plannedOf(cell).length;
+      if (record && planned !== sessions.length) parts.push(el("span", "p", `plan ${planned}`));
+      cell.replaceChildren(...parts);
+      cell.classList.toggle("zero", !sessions.length);
+      cell.classList.toggle("clash", sessions.some((s) => s.hint?.clashes?.length));
+      const row = cell.closest("[data-grid-row]");
+      cell.setAttribute("aria-label", `${row.dataset.title}, ${cell.dataset.date}: ${sessions.length}`);
+    };
+
+    const total = (row) => {
+      const placed = [...row.querySelectorAll("[data-cell]")].reduce((n, cell) => n + rowsOf(cell).children.length, 0);
+      const target = Number(row.dataset.target);
+      const box = row.querySelector("[data-total]");
+      box.classList.toggle("short", placed < target);
+      box.replaceChildren(el("span", "", String(placed)), ` / ${target}`);
+      if (placed > target) box.append(" ", el("span", "muted", `+${placed - target}`));
+      box.append(el("span", "sr-only", record ? " happened" : " placed"));
+    };
+
+    // Rewrite a cell's hidden rows from `sessions`, then let the guard, totals and clash check know.
+    const write = (cell, sessions) => {
+      const rows = rowsOf(cell);
+      const values = (s) => ({
+        slot_kind: "tactic",
+        slot_ref: tacticOf(cell),
+        slot_origin: "",
+        slot_title: "",
+        slot_day: cell.dataset.day,
+        slot_time: s.time,
+        slot_minutes: s.time ? s.minutes || "60" : "",
+        slot_plan: s.plan || "",
+      });
+      rows.replaceChildren(
+        ...sessions.map((s) => {
+          const row = el("div", "");
+          row.dataset.sessionRow = "";
+          Object.entries(values(s)).forEach(([name, value]) => {
+            const input = el("input", "");
+            input.type = "hidden";
+            input.name = name;
+            input.value = value;
+            row.append(input);
+          });
+          row.hint = s.hint;
+          return row;
+        }),
+      );
+      label(cell, sessions);
+      total(cell.closest("[data-grid-row]"));
+      form.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+
+    // The length a new time gets: the last one used anywhere in this tactic's row, else an hour.
+    const usualMinutes = (cell) => {
+      const minutes = [...cell.closest("[data-grid-row]").querySelectorAll('[name="slot_minutes"]')]
+        .map((input) => input.value)
+        .filter(Boolean);
+      return minutes.at(-1) || "60";
+    };
+
+    const add = (cell, sessions) => {
+      const used = new Set(sessions.map((s) => s.plan).filter(Boolean));
+      const back = plannedOf(cell).find((p) => !used.has(p.id));
+      return [...sessions, back ? { time: back.time, minutes: back.minutes, plan: back.id } : { time: "", minutes: "", plan: "" }];
+    };
+    const remove = (sessions) => {
+      // Recording: an unplanned session goes first. Planning: one with no set time goes first.
+      const spare = (s) => (record ? !s.plan : !s.time);
+      let i = sessions.findLastIndex(spare);
+      if (i < 0) i = sessions.length - 1;
+      return sessions.filter((_, n) => n !== i);
+    };
+
+    let open = null; // the cell being edited
+    const draw = () => {
+      const cell = open;
+      const sessions = read(cell);
+      const row = cell.closest("[data-grid-row]");
+      const minus = el("button", "", "−");
+      minus.type = "button";
+      minus.setAttribute("aria-label", "One fewer");
+      minus.disabled = !sessions.length;
+      minus.addEventListener("click", () => {
+        write(cell, remove(sessions));
+        draw();
+      });
+      const plus = el("button", "", "+");
+      plus.type = "button";
+      plus.setAttribute("aria-label", "One more");
+      plus.addEventListener("click", () => {
+        write(cell, add(cell, sessions));
+        draw();
+        pop.querySelector(".pop-session:last-child input")?.focus();
+      });
+      const count = el("output", "", String(sessions.length));
+      count.setAttribute("aria-live", "polite");
+      const step = el("div", "count-step");
+      step.append(minus, count, plus, el("span", "muted small", sessions.length === 1 ? "session" : "sessions"));
+
+      const list = el("div", "pop-sessions");
+      sessions.forEach((s, i) => {
+        const line = el("div", "pop-session");
+        const time = el("input", "");
+        time.type = "time";
+        time.value = s.time;
+        time.setAttribute("aria-label", `Session ${i + 1} start time`);
+        const minutes = el("input", "");
+        minutes.type = "number";
+        minutes.min = "5";
+        minutes.max = "720";
+        minutes.step = "5";
+        minutes.inputMode = "numeric";
+        minutes.placeholder = "min";
+        minutes.value = s.time ? s.minutes : "";
+        minutes.disabled = !s.time;
+        minutes.setAttribute("aria-label", `Session ${i + 1} length in minutes`);
+        const clear = el("button", "icon-btn", "✕");
+        clear.type = "button";
+        clear.title = "No set time";
+        clear.setAttribute("aria-label", `Session ${i + 1}: no set time`);
+        clear.hidden = !s.time;
+        const update = (changes) => {
+          const next = read(cell);
+          next[i] = { ...next[i], ...changes };
+          write(cell, next);
+        };
+        time.addEventListener("change", () => {
+          const minutesNow = time.value ? minutes.value || usualMinutes(cell) : "";
+          update({ time: time.value, minutes: minutesNow });
+          minutes.value = minutesNow;
+          minutes.disabled = clear.hidden = !time.value;
+        });
+        minutes.addEventListener("change", () => update({ minutes: minutes.value }));
+        clear.addEventListener("click", () => {
+          update({ time: "", minutes: "" });
+          draw();
+        });
+        line.append(el("span", "muted small", `#${i + 1}`), time, minutes, clear);
+        if (s.hint?.clashes?.length) {
+          const note = el("div", "slot-note");
+          s.hint.clashes.forEach((text) => note.append(el("p", "", `⚠ ${text}`)));
+          const fixes = el("p", "slot-fixes");
+          [s.hint.earlier, s.hint.later].filter(Boolean).forEach((at) => {
+            const move = el("button", "btn small", `Move to ${at}`);
+            move.type = "button";
+            move.addEventListener("click", () => {
+              update({ time: at });
+              draw();
+            });
+            fixes.append(move);
+          });
+          if (s.hint.no_gap) fixes.append(el("span", "muted", s.hint.no_gap));
+          note.append(fixes);
+          line.append(note);
+        }
+        list.append(line);
+      });
+
+      const parts = [el("h2", "", row.dataset.title), el("p", "muted small", cell.dataset.date)];
+      if (record) {
+        const planned = plannedOf(cell);
+        // "Planned: 4 · any time", "Planned: 2 · 07:00, 1 any time"
+        const times = planned.map((p) => p.time).filter(Boolean);
+        const loose = planned.length - times.length;
+        const when = [...times, ...(loose ? [times.length ? `${loose} any time` : "any time"] : [])];
+        const said = planned.length ? `Planned: ${planned.length} · ${when.join(", ")}` : "Nothing planned this day.";
+        parts.push(el("p", "muted small", said));
+      }
+      parts.push(step);
+      if (sessions.length) parts.push(el("p", "muted small", "Times are optional. Leave one blank for any time that day."), list);
+      const done = el("button", "btn primary", "Done");
+      done.type = "button";
+      done.addEventListener("click", () => pop.hidePopover());
+      const buttons = el("div", "row-buttons");
+      buttons.append(done);
+      parts.push(buttons);
+      pop.replaceChildren(...parts);
+      shown = hintsOf(cell);
+    };
+
+    grid.addEventListener("click", (e) => {
+      const cell = e.target.closest("[data-cell]");
+      if (cell) {
+        open = cell;
+        draw();
+        pop.showPopover();
+        (pop.querySelector(".count-step button:last-of-type") || pop.querySelector("button"))?.focus();
+        return;
+      }
+      const fill = e.target.closest("[data-fill]");
+      if (!fill) return;
+      const row = fill.closest("[data-grid-row]");
+      fill.closest("details").open = false;
+      const cells = [...row.querySelectorAll("[data-cell]")];
+      const days = fill.dataset.fill === "weekdays" ? cells.filter((c) => WEEKDAYS.has(c.dataset.day)) : cells;
+      const target = fill.dataset.fill === "clear" ? 0 : Number(row.dataset.target);
+      // Spread the whole target, earliest days first, keeping times already set while a day has room.
+      cells.forEach((cell) => {
+        const n = days.indexOf(cell);
+        const want = n < 0 ? 0 : Math.floor(target / days.length) + (n < target % days.length ? 1 : 0);
+        const current = read(cell);
+        const timed = current.filter((s) => s.time);
+        const kept = [...timed, ...current.filter((s) => !s.time)].slice(0, Math.min(want, timed.length));
+        while (kept.length < want) kept.push({ time: "", minutes: "", plan: "" });
+        write(cell, kept);
+      });
+    });
+
+    pop.addEventListener("toggle", (e) => {
+      if (e.newState === "closed" && open) {
+        open.focus();
+        open = null;
+      }
+    });
+    // Fresh clash answers: re-mark cells, and redraw the editor if its hints changed (keeping focus).
+    const hintsOf = (cell) => JSON.stringify(read(cell).map((s) => s.hint || null));
+    let shown = "";
+    form.addEventListener("hints", () => {
+      grid.querySelectorAll("[data-cell]").forEach((cell) => label(cell, read(cell)));
+      if (!open || !pop.matches(":popover-open") || hintsOf(open) === shown) return;
+      const focused = document.activeElement?.getAttribute("aria-label");
+      draw();
+      if (focused) pop.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    });
   });
 
   // Confirm destructive actions (delete, close cycle).

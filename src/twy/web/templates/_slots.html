@@ -39,19 +39,59 @@
 </fieldset>
 {%- endmacro %}
 
-{#- One tactic on the week planning page (or, with record=True, the page recording what happened). -#}
-{% macro tactic_group(group, record=False) -%}
-{% set hidden = {"slot_kind": "tactic", "slot_ref": group.tactic.id, "slot_origin": "", "slot_title": ""} %}
-<fieldset class="slots plan-group" data-slots id="tactic-{{ group.tactic.id }}">
-  <legend>{{ group.tactic.title }}</legend>
-  <p class="muted small">{{ group.goal_title }} · <span data-placed-for="{{ group.tactic.id }}">{{ group.placed }}</span> of {{ group.tactic.times_per_week }} {{ "happened" if record else "placed" }}</p>
-  {{ slot_head() }}
-  <div data-slot-rows>
-    {%- for row in group.rows %}{{ slot_row(row, dict(hidden, slot_plan=row.plan or ""), note=row.note) }}{% endfor -%}
+{#- The week grid: a row per tactic, a cell per day holding how many sessions it gets there, each with an
+    optional time. Each session posts as a hidden row (see week_plans.FORM_FIELDS); app.js edits them
+    through #cell-pop. With record=True it records what happened, and each cell knows what was planned. -#}
+{% macro session_row(tactic_id, weekday, s) -%}
+<div data-session-row>
+  <input type="hidden" name="slot_kind" value="tactic"><input type="hidden" name="slot_ref" value="{{ tactic_id }}">
+  <input type="hidden" name="slot_origin" value=""><input type="hidden" name="slot_title" value="">
+  <input type="hidden" name="slot_day" value="{{ weekday }}"><input type="hidden" name="slot_time" value="{{ s.time }}">
+  <input type="hidden" name="slot_minutes" value="{{ s.minutes }}"><input type="hidden" name="slot_plan" value="{{ s.plan or '' }}">
+</div>
+{%- endmacro %}
+
+{#- What a cell shows: the count, the first set time, and when recording, what was planned if that differs. -#}
+{% macro cell_label(cell, record) -%}
+{% set times = cell.sessions|map(attribute="time")|select|list %}
+<span class="n">{{ cell.count or "·" }}</span>
+{%- if times %}<span class="t">{{ times[0] }}{% if times|length > 1 %} +{{ times|length - 1 }}{% endif %}</span>{% endif %}
+{%- if record and cell.planned|length != cell.count %}<span class="p">plan {{ cell.planned|length }}</span>{% endif %}
+{%- endmacro %}
+
+{% macro tactic_grid(groups, days, record=False) -%}
+<div class="week-grid" data-week-grid{% if record %} data-record{% endif %}>
+  <div class="wg-head" aria-hidden="true">
+    {%- for d in days %}<span class="wg-day{{ ' today' if d == today }}">{{ WEEKDAY_SHORT[d.weekday()] }} <small>{{ d.day }}</small></span>{% endfor -%}
   </div>
-  <template data-slot-template>{{ slot_row({"day": group.rows[-1].day if group.rows else "0", "time": "", "minutes": group.rows[-1].minutes if group.rows else "60"}, dict(hidden, slot_plan=""), note="Added: wasn't in the plan" if record else None) }}</template>
-  <button type="button" class="btn small" data-add-slot data-js-only hidden>+ Add time</button>
-</fieldset>
+  {%- for g in groups %}
+  <div class="wg-row" data-grid-row data-target="{{ g.tactic.times_per_week }}" data-title="{{ g.tactic.title }}" id="tactic-{{ g.tactic.id }}">
+    <div class="wg-name"><strong>{{ g.tactic.title }}</strong><span class="muted small">{{ g.goal_title }} · {{ g.tactic.times_per_week }}× a week</span></div>
+    <div class="wg-side">
+      <span class="wg-total{{ ' short' if g.placed < g.tactic.times_per_week }}" data-total><span data-placed>{{ g.placed }}</span> / {{ g.tactic.times_per_week }}{% if g.over %} <span class="muted">+{{ g.over }}</span>{% endif %}<span class="sr-only"> {{ "happened" if record else "placed" }}</span></span>
+      {%- if not record %}
+      <details class="wg-menu">
+        <summary aria-label="Fill {{ g.tactic.title }}">⋯</summary>
+        <div class="wg-menu-list">
+          <button type="button" class="btn small" data-fill="all">Spread evenly</button>
+          <button type="button" class="btn small" data-fill="weekdays">Weekdays only</button>
+          <button type="button" class="btn small" data-fill="clear">Clear row</button>
+        </div>
+      </details>
+      {%- endif %}
+    </div>
+    {%- for c in g.days %}
+    <div class="wg-cell">
+      <button type="button" class="cell{{ ' zero' if not c.count }}" data-cell data-day="{{ c.weekday }}" data-date="{{ c.day.strftime('%A') }} {{ c.day.day }} {{ c.day.strftime('%b') }}"
+        {%- if record %} data-planned='{{ c.planned|tojson }}'{% endif %}
+        aria-label="{{ g.tactic.title }}, {{ c.day.strftime('%A') }}: {{ c.count }}">{{ cell_label(c, record) }}</button>
+      <div hidden data-cell-rows>{% for s in c.sessions %}{{ session_row(g.tactic.id, c.weekday, s) }}{% endfor %}</div>
+    </div>
+    {%- endfor %}
+  </div>
+  {%- endfor %}
+  <div id="cell-pop" class="session-pop cell-pop" popover></div>
+</div>
 {%- endmacro %}
 
 {#- One block on the week planning page: its occurrences this week. A blank time skips one (or, recording, didn't happen). -#}

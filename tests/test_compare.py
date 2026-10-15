@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from twy.domain.compare import compare, log_hints, summary
+from twy.domain.compare import compare, log_hints, summary, when
 from twy.models import WeekItem
 
 MON, TUE, WED = 0, 1, 2
@@ -69,3 +69,17 @@ def test_log_hints_only_when_fewer_were_logged_than_happened():
     assert log_hints(compare(plan, actual), {}, titles) == [
         "Run: 1 in the calendar, 0 logged on Today. 1 may not have happened."
     ]
+
+
+def test_a_session_with_no_set_time_is_compared_by_its_day():
+    untimed = replace(run(WED, None, 2), duration_min=None)
+    assert when(untimed) == "Wed" and when(run(WED, 420)) == "Wed 07:00"
+    plan = [run(MON, 420, 1), untimed]
+    actual = [
+        replace(run(MON, None, 11, plan_item_id=1, layer="actual"), duration_min=None),  # happened, time not noted
+        run(WED, 1080, 12, plan_item_id=2, layer="actual"),  # planned for Wednesday, happened at 18:00
+    ]
+    assert [c.status for c in compare(plan, actual)] == ["kept", "kept"]
+    moved = replace(untimed, id=13, layer="actual", plan_item_id=2, weekday=TUE)
+    assert [c.status for c in compare(plan, [actual[0], moved])] == ["kept", "moved"]
+    assert compare(plan, [actual[0], moved])[1].label == "moved from Wed"

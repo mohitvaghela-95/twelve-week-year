@@ -109,6 +109,7 @@ from twy.week_plans import (
     parse_review_record,
     plan_form,
     plannable_weeks,
+    planned_on,
     posted_form,
     recordable,
     resolved_items,
@@ -117,6 +118,8 @@ from twy.week_plans import (
     save_week_plan,
     shortfall,
     unplanned_reminders,
+    week_anytime,
+    week_days,
     week_ended,
     week_plan_check,
     week_record,
@@ -719,6 +722,7 @@ def week(cycle_id: int, week_no: int):
         abort(404)
     view = week_view(r, cycle, week_no, today())
     sessions = view.sessions
+    anytime_count = sum(a.count for a in view.anytime)
     imported = imports_for_week(r, cycle, week_no)
     shown = sorted(sessions + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     first, last = week_range(cycle.start_date, week_no)
@@ -748,7 +752,8 @@ def week(cycle_id: int, week_no: int):
         imported=imported,
         kinds=SESSION_KINDS,
         total_min=sum(s.duration_min for s in sessions),
-        session_count=len(sessions),
+        session_count=len(sessions) + anytime_count,
+        anytime=by_day(view.anytime),
         planned=planned,
         has_tactics=bool(tactics),
         short=shortfall(tactics, resolved_items(r, cycle, week_no)) if planned and not ended else [],
@@ -781,6 +786,8 @@ def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied
         last=last,
         form=form,
         days=[(d, [s for s in saved if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        grid_days=week_days(cycle, week_no),
+        anytime=by_day(week_anytime(r, cycle, week_no)),
         imported=imported,
         kinds=SESSION_KINDS,
         planned=week_no in r.planned_weeks(cycle.id),
@@ -790,6 +797,14 @@ def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied
         today=today(),
         tab="week",
     ), 422 if error else 200
+
+
+def by_day(anytime: list) -> dict:
+    """Anytime sessions grouped by date, for the day-by-day lists."""
+    grouped: dict = {}
+    for a in anytime:
+        grouped.setdefault(a.day, []).append(a)
+    return grouped
 
 
 def plannable_week(cycle_id: int, week_no: int) -> Cycle:
@@ -864,6 +879,8 @@ def actual_page(cycle: Cycle, week_no: int, form, record, error: str | None = No
         record=record,
         summary=summary_text(record),
         days=[(d, [s for s in planned if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        grid_days=week_days(cycle, week_no),
+        anytime=by_day(week_anytime(r, cycle, week_no)),
         imported=imported,
         kinds=SESSION_KINDS,
         next_url=local_next(""),
@@ -974,6 +991,8 @@ def day_page(cycle_id: int, iso: str):
             [s for s in week_sessions(r, cycle, week_no) if s.day == day] + imported.on(day),
             key=lambda s: (s.start_min, s.title),
         ),
+        anytime=[a for a in week_anytime(r, cycle, week_no) if a.day == day],
+        planned_today=planned_on(r, cycle, day),
         all_day=imported.all_day.get(day, []),
         import_errors=imported.errors,
         unplanned=unplanned_reminders(r, cycle, today()),
@@ -1105,6 +1124,7 @@ def review(cycle_id: int, week_no: int):
         read_only=read_only,
         in_progress=current_week(cycle.start_date, today()).week_no,
         what_happened=what_happened,
+        grid_days=week_days(cycle, week_no),
         record_open=bool(error and request.method == "POST" and "record_present" in request.form)
         or bool(what_happened and (what_happened.hints or what_happened.record.recorded)),
         record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no, next=request.path),
@@ -1366,7 +1386,8 @@ def calendar_feed(token: str):
     planned = {(c.id, w) for c in cycles for w in r.planned_weeks(c.id)}
     weeks = feed_weeks(cycles, planning, today(), planned)
     sessions = [s for cycle, week_no in weeks for s in week_sessions(r, cycle, week_no)]
-    body = render_calendar(sessions, r.alert_minutes, datetime.now(UTC))
+    anytime = [a for cycle, week_no in weeks for a in week_anytime(r, cycle, week_no)]
+    body = render_calendar(sessions, r.alert_minutes, datetime.now(UTC), anytime=anytime)
     return Response(body, mimetype="text/calendar", headers={"Cache-Control": "no-cache"})
 
 

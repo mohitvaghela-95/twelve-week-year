@@ -188,12 +188,19 @@ def test_week_items_round_trip(repo):
         WeekItem(cycle.id, 2, "tactic", 2, 1080, 45, tactic_id=run.id),
         WeekItem(cycle.id, 2, "tactic", 0, 420, 30, tactic_id=run.id),
         WeekItem(cycle.id, 2, "block", 4, 960, 30, block_id=admin.id, orig_weekday=4, orig_start_min=960),
+        WeekItem(cycle.id, 2, "tactic", 2, None, None, tactic_id=run.id),  # Wednesday, no set time
     ]
     assert repo.planned_weeks(cycle.id) == set()
     repo.replace_week_items(cycle.id, 2, "plan", items)
     assert repo.planned_weeks(cycle.id) == {2}
     saved = repo.week_items(cycle.id, 2)
-    assert [(i.title, i.weekday, i.start_min) for i in saved] == [("Run", 0, 420), ("Run", 2, 1080), ("Admin", 4, 960)]
+    assert [(i.title, i.weekday, i.start_min, i.duration_min) for i in saved] == [
+        ("Run", 0, 420, 30),
+        ("Run", 2, None, None),
+        ("Run", 2, 1080, 45),
+        ("Admin", 4, 960, 30),
+    ]
+    assert not saved[1].timed and saved[2].timed
     assert repo.week_items(cycle.id, 2, "actual") == []
 
     # An empty plan still counts as planned; replacing a week leaves other weeks alone.
@@ -209,7 +216,7 @@ def test_week_items_round_trip(repo):
     assert (orphan.tactic_id, orphan.title) == (None, "Run")
 
     repo.prune_plan_rows(cycle.id, "block", admin.id, [2])
-    assert [i.kind for i in repo.week_items(cycle.id, 2)] == ["tactic", "tactic"]
+    assert [i.kind for i in repo.week_items(cycle.id, 2)] == ["tactic", "tactic", "tactic"]
 
 
 def test_resync_block_rows_keeps_one_week_changes(repo):
@@ -419,3 +426,45 @@ def test_factory_reset(repo):
     prompts = [(p.scope, p.label, p.kind) for scope in ("daily", "weekly") for p in repo.list_prompts(scope)]
     assert prompts == DEFAULT_PROMPTS
     assert [p.position for p in repo.list_prompts("daily")] == [0, 1, 2]
+
+
+def test_migration_v7_makes_tactic_times_optional(tmp_path):
+    path = tmp_path / "v6.db"
+    old = sqlite3.connect(path)
+    old.execute("PRAGMA foreign_keys = ON")
+    for script in MIGRATIONS[:6]:
+        old.executescript(script)
+    old.execute("PRAGMA user_version = 6")
+    old.executescript(
+        """
+        INSERT INTO cycle (id, name, start_date, week_start) VALUES (1, 'Q4', '2026-10-05', 0);
+        INSERT INTO goal (id, cycle_id, title) VALUES (1, 1, 'Fit');
+        INSERT INTO tactic (id, goal_id, title, times_per_week) VALUES (1, 1, 'Run', 3);
+        INSERT INTO week_item (id, cycle_id, week_no, layer, kind, tactic_id, title, weekday, start_min, duration_min)
+            VALUES (7, 1, 1, 'plan', 'tactic', 1, 'Run', 0, 420, 30);
+        INSERT INTO week_item (id, cycle_id, week_no, layer, kind, tactic_id, plan_item_id, title, weekday,
+            start_min, duration_min) VALUES (8, 1, 1, 'actual', 'tactic', 1, 7, 'Run', 1, 420, 30);
+        """
+    )
+    old.commit()
+    old.close()
+
+    repo = Repo(connect(path))
+    assert repo.conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
+    # Rows and the link from what happened to the plan survive the rebuild.
+    [actual] = repo.week_items(1, 1, "actual")
+    assert (actual.id, actual.plan_item_id, actual.weekday) == (8, 7, 1)
+    assert repo.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    # Deleting a plan row still clears the link that points at it.
+    repo.conn.execute("DELETE FROM week_item WHERE id = 7")
+    assert repo.week_items(1, 1, "actual")[0].plan_item_id is None
+
+    insert = (
+        "INSERT INTO week_item (cycle_id, week_no, layer, kind, title, weekday, start_min, duration_min) "
+        "VALUES (1, 1, 'plan', ?, 'x', 2, ?, ?)"
+    )
+    repo.conn.execute(insert, ("tactic", None, None))  # a tactic session with no set time
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.conn.execute(insert, ("block", None, None))  # blocks and events always have a time
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.conn.execute(insert, ("tactic", None, 30))  # a length without a start

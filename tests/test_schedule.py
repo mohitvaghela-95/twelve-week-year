@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from twy.domain.schedule import (
     Session,
+    anytime_from_items,
     cycle_week_at,
     feed_weeks,
     lanes,
@@ -149,3 +150,26 @@ def test_feed_hands_over_to_the_next_cycle():
 def test_feed_is_empty_outside_any_cycle():
     assert feed_weeks([cycle()], {1: 6}, MON - timedelta(days=3)) == []
     assert feed_weeks([], {}, MON) == []
+
+
+def test_untimed_tactic_sessions_are_counted_per_day_not_timed():
+    c = cycle()
+    timed = [
+        WeekItem(1, 2, "tactic", 2, 420, 60, tactic_id=1, title="Study"),
+        WeekItem(1, 2, "tactic", 0, 420, 60, tactic_id=1, title="Study"),
+    ]
+    untimed = [
+        WeekItem(1, 2, "tactic", 1, None, None, tactic_id=1, title="Study"),
+        WeekItem(1, 2, "tactic", 2, None, None, tactic_id=2, title="Water"),
+        WeekItem(1, 2, "tactic", 2, None, None, tactic_id=2, title="Water"),
+    ]
+    # Untimed sessions don't shift the timed ones' calendar keys.
+    sessions = sessions_from_items(c, 2, [*untimed, *timed], {}, {})
+    assert [s.uid for s in sessions] == ["tactic-1-w2-1@twy", "tactic-1-w2-2@twy"]
+
+    found = anytime_from_items(c, 2, [*timed, *untimed], {1: "Career", 2: "Health"})
+    assert [(a.day, a.label, a.count, a.context) for a in found] == [
+        (date(2026, 10, 13), "Study", 1, "Career"),
+        (date(2026, 10, 14), "Water ×2", 2, "Health"),
+    ]
+    assert found[1].uid == "tactic-2-w2-d20261014@twy"
