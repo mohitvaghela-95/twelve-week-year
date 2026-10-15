@@ -79,7 +79,7 @@
   {% for s in sessions %}
   <{{ "a" if s.owner == "tactic" else "div" }} class="session kind-{{ s.kind }}"{% if s.owner == "tactic" %} href="#t-{{ s.owner_id }}"{% endif %}>
     <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
-    <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}</span></span>
+    <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}</span></span>
   </{{ "a" if s.owner == "tactic" else "div" }}>
   {% endfor %}
 </section>

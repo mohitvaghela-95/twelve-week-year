@@ -76,6 +76,15 @@ def test_sessions_from_items_number_tactics_and_keep_block_keys():
     [moved_session] = sessions_from_items(c, 2, [moved], {}, {3: "admin"})
     assert moved_session.uid == week2[2].uid and moved_session.day == date(2026, 10, 17)
 
+    # Events are numbered in time order within their cycle week.
+    dinner = WeekItem(1, 2, "event", 4, 1140, 120, title="Dinner")
+    dentist = WeekItem(1, 2, "event", 1, 540, 30, title="Dentist")
+    events = sessions_from_items(c, 2, [dinner, dentist], {}, {})
+    assert [(s.title, s.owner, s.kind, s.owner_id, s.uid) for s in events] == [
+        ("Dentist", "event", "event", None, "event-c1-w2-1@twy"),
+        ("Dinner", "event", "event", None, "event-c1-w2-2@twy"),
+    ]
+
 
 def test_overlaps_and_lanes():
     a = session(MON, 420, 60, 1)  # 07:00–08:00

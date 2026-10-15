@@ -88,19 +88,22 @@ from twy.services import (
 from twy.web.ics import render_calendar
 from twy.web.svg import score_chart_svg
 from twy.week_plans import (
+    FORM_FIELDS,
+    active_tactics,
     after_block_saved,
     after_tactic_saved,
     before_block_deleted,
     before_tactics_deleted,
     copy_prev_items,
+    form_rows,
     next_week_to_plan,
-    parse_week_rows,
+    parse_plan_rows,
+    plan_form,
     plannable_weeks,
-    posted_groups,
+    posted_form,
     resolved_items,
     save_week_plan,
     shortfall,
-    tactic_groups,
     unplanned_reminders,
     week_ended,
     week_plan_check,
@@ -188,6 +191,9 @@ def posted_slots() -> list[Slot]:
 def to_plan(cycle: Cycle, anchor: str | None = None):
     return redirect(url_for(".plan", cycle_id=cycle.id, _anchor=anchor))
 
+
+# What a session on the Week page, Today or a week's plan is, as people read it.
+SESSION_KINDS = {**BLOCK_KINDS, "event": "Event"}
 
 # Cycle statuses as people read them (the stored ones are short identifiers).
 STATUS_LABELS = {"planning": "Planning", "active": "In progress", "review": "Week 13 review", "closed": "Closed"}
@@ -666,7 +672,6 @@ def week(cycle_id: int, week_no: int):
     tactics = [t for t in tactics if t.active_in(week_no)]
     can_plan = (
         cycle.status != "closed"
-        and bool(tactics)
         and week_no in plannable_weeks(cycle, today())
         and not week_ended(cycle, week_no, today())
     )
@@ -679,7 +684,7 @@ def week(cycle_id: int, week_no: int):
         days=[(d, [s for s in sessions if s.day == d]) for d in days],
         clashes=overlaps(sessions),
         layout=lanes(sessions),
-        kinds=BLOCK_KINDS,
+        kinds=SESSION_KINDS,
         total_min=sum(s.duration_min for s in sessions),
         session_count=len(sessions),
         planned=planned,
@@ -696,22 +701,19 @@ def week(cycle_id: int, week_no: int):
     )
 
 
-def plan_page(cycle: Cycle, week_no: int, groups, error: str | None = None, copied: bool = False):
+def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied: bool = False):
     r = repo()
     first, last = week_range(cycle.start_date, week_no)
-    busy = week_sessions(r, cycle, week_no)
+    saved = week_sessions(r, cycle, week_no)
     return render_template(
         "week_plan.html",
         cycle=cycle,
         week_no=week_no,
         first=first,
         last=last,
-        groups=groups,
-        days=[
-            (d, [s for s in busy if s.day == d and s.owner != "tactic"])
-            for d in (first + timedelta(days=i) for i in range(7))
-        ],
-        kinds=BLOCK_KINDS,
+        form=form,
+        days=[(d, [s for s in saved if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        kinds=SESSION_KINDS,
         planned=week_no in r.planned_weeks(cycle.id),
         can_copy=week_no > 1 and week_no - 1 in r.planned_weeks(cycle.id),
         copied=copied,
@@ -729,43 +731,44 @@ def plannable_week(cycle_id: int, week_no: int) -> Cycle:
     return cycle
 
 
+def posted_plan_rows():
+    return form_rows({name: request.form.getlist(name) for name in FORM_FIELDS})
+
+
 @bp.route("/c/<int:cycle_id>/week/<int:week_no>/plan", methods=["GET", "POST"])
 def week_plan(cycle_id: int, week_no: int):
-    """Plan one week: place each tactic's sessions around what's already on."""
+    """Plan one week: place each tactic's sessions around what's already on, and adjust the blocks."""
     r = repo()
     cycle = plannable_week(cycle_id, week_no)
-    f = request.form
-    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
+    tactics = active_tactics(r, cycle, week_no)
     if request.method == "POST":
+        rows = posted_plan_rows()
         try:
-            items = parse_week_rows(
-                cycle, week_no, [g.tactic for g in tactic_groups(r, cycle, week_no, [])], f.getlist("slot_kind"), *lists
-            )
+            items = parse_plan_rows(cycle, week_no, tactics, r.list_blocks(cycle.id), rows)
             save_week_plan(r, cycle, week_no, today(), items)
         except FormError as e:
-            return plan_page(cycle, week_no, posted_groups(r, cycle, week_no, *lists), str(e))
-        short = shortfall([g.tactic for g in tactic_groups(r, cycle, week_no, [])], items)
-        note = "; ".join(f"{t.title} {n} of {t.times_per_week}" for t, n in short)
+            return plan_page(cycle, week_no, posted_form(r, cycle, week_no, rows), str(e))
+        note = "; ".join(f"{t.title} {n} of {t.times_per_week}" for t, n in shortfall(tactics, items))
         flash(f"Week {week_no} planned." + (f" Not all placed: {note}." if note else ""), "warn" if note else "info")
         return redirect(url_for(".week", cycle_id=cycle.id, week_no=week_no))
 
+    items = resolved_items(r, cycle, week_no)
     copied = request.args.get("copy") == "prev"
-    items = copy_prev_items(r, cycle, week_no) if copied else None
-    if copied and items is None:
-        flash(f"Week {week_no - 1} wasn't planned, so there's nothing to copy.", "warn")
-        copied = False
-    if items is None:
-        items = resolved_items(r, cycle, week_no)
-    return plan_page(cycle, week_no, tactic_groups(r, cycle, week_no, items), copied=copied)
+    if copied:
+        previous = copy_prev_items(r, cycle, week_no)
+        if previous is None:
+            flash(f"Week {week_no - 1} wasn't planned, so there's nothing to copy.", "warn")
+            copied = False
+        else:
+            items = previous + [i for i in items if i.kind != "tactic"]
+    return plan_page(cycle, week_no, plan_form(r, cycle, week_no, items), copied=copied)
 
 
 @bp.post("/c/<int:cycle_id>/week/<int:week_no>/plan/check")
 def week_plan_check_json(cycle_id: int, week_no: int):
     """Live clash hints and placed counts for the planning form."""
     cycle = plannable_week(cycle_id, week_no)
-    f = request.form
-    lists = [f.getlist(k) for k in ("slot_ref", "slot_day", "slot_time", "slot_minutes")]
-    return jsonify(week_plan_check(repo(), cycle, week_no, *lists))
+    return jsonify(week_plan_check(repo(), cycle, week_no, posted_plan_rows()))
 
 
 # -- today ------------------------------------------------------------------------
@@ -829,7 +832,7 @@ def day_page(cycle_id: int, iso: str):
         progress=week_progress(rows),
         sessions=[s for s in week_sessions(r, cycle, week_no) if s.day == day],
         unplanned=unplanned_reminders(r, cycle, today()),
-        kinds=BLOCK_KINDS,
+        kinds=SESSION_KINDS,
         existing=existing,
         items=items,
         error=error,

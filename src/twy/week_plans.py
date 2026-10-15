@@ -3,17 +3,20 @@
 Tactics have no fixed times. Each week you place its sessions around whatever else is going on,
 the book's "plan your week" step. Blocks stay weekly templates: a week that hasn't been planned
 shows them as they are, and saving a week's plan stores its block occurrences alongside the
-tactic sessions, so a past week keeps the plan it had. No Flask imports here.
+tactic sessions, so a past week keeps the plan it had. A week's plan can also skip or move a
+block for that week only, and hold one-off events. No Flask imports here.
 """
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
+from itertools import zip_longest
 
 from twy.domain.conflicts import Placed, placed_for_week
 from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, current_week, week_range
 from twy.domain.schedule import Session, planning_offset, sessions_from_items, template_items
-from twy.models import Cycle, Tactic, WeekItem, hhmm
+from twy.models import WEEKDAY_SHORT, Block, Cycle, Tactic, WeekItem, hhmm
 from twy.repo import Repo
 from twy.services import FormError, clash_hints, form_slots, parse_slot_row
 
@@ -71,6 +74,45 @@ def shortfall(tactics: list[Tactic], items: list[WeekItem]) -> list[tuple[Tactic
 
 # -- the planning form ------------------------------------------------------------
 
+# One row per session, as parallel lists: kind (tactic | block | event), ref (tactic or block id),
+# origin ("weekday:start" of a block's weekly slot), title (events), then day, time and minutes.
+FORM_FIELDS = ("slot_kind", "slot_ref", "slot_origin", "slot_title", "slot_day", "slot_time", "slot_minutes")
+STALE = "Something on this page has changed. Reload the page and try again."
+EVENT_TITLE_MAX = 120
+
+
+@dataclass
+class FormRow:
+    kind: str
+    ref: str = ""
+    origin: str = ""
+    title: str = ""
+    day: str = "0"
+    time: str = ""
+    minutes: str = "60"
+
+    @property
+    def view(self) -> dict:
+        return {"day": self.day, "time": self.time, "minutes": self.minutes, "title": self.title}
+
+
+def form_rows(lists: Mapping[str, list[str]]) -> list[FormRow]:
+    """The planning form's parallel lists, zipped into rows."""
+    columns = [lists.get(name, []) for name in FORM_FIELDS]
+    return [FormRow(*values) for values in zip_longest(*columns, fillvalue="")]
+
+
+def parse_origin(text: str) -> tuple[int, int] | None:
+    """A block row's "weekday:start" back to numbers, or None if it was tampered with."""
+    day, _, start = text.partition(":")
+    if not (day.isdigit() and start.isdigit() and 0 <= int(day) <= 6 and 0 <= int(start) < 24 * 60):
+        return None
+    return int(day), int(start)
+
+
+def usual_label(origin: tuple[int, int]) -> str:
+    return f"{WEEKDAY_SHORT[origin[0]]} {hhmm(origin[1])}"
+
 
 @dataclass
 class TacticGroup:
@@ -83,6 +125,21 @@ class TacticGroup:
     @property
     def placed(self) -> int:
         return sum(1 for r in self.rows if r["time"].strip())
+
+
+@dataclass
+class BlockGroup:
+    """One block on the planning page: its occurrences this week. A blank time skips one."""
+
+    block: Block
+    rows: list[dict] = field(default_factory=list)  # also "origin" and "usual"
+
+
+@dataclass
+class PlanForm:
+    tactics: list[TacticGroup]
+    blocks: list[BlockGroup]
+    events: list[dict]  # {"title", "day", "time", "minutes"}
 
 
 def tactic_groups(repo: Repo, cycle: Cycle, week_no: int, items: list[WeekItem]) -> list[TacticGroup]:
@@ -102,69 +159,158 @@ def tactic_groups(repo: Repo, cycle: Cycle, week_no: int, items: list[WeekItem])
     return groups
 
 
-def posted_groups(
-    repo: Repo, cycle: Cycle, week_no: int, refs: list[str], days: list[str], times: list[str], minutes: list[str]
-) -> list[TacticGroup]:
+def blank_event(cycle: Cycle) -> dict:
+    return {"title": "", "day": str(cycle.start_date.weekday()), "time": "", "minutes": "60"}
+
+
+def plan_form(repo: Repo, cycle: Cycle, week_no: int, items: list[WeekItem]) -> PlanForm:
+    """The planning form for a week's items: tactics, then blocks (in Plan order), then events."""
+    blocks = []
+    for b in repo.list_blocks(cycle.id):
+        rows = []
+        for i in items:
+            if i.kind == "block" and i.block_id == b.id:
+                origin = (i.weekday, i.start_min) if i.orig_weekday is None else (i.orig_weekday, i.orig_start_min)
+                rows.append(
+                    {
+                        "day": str(i.weekday),
+                        "time": "" if i.skipped else hhmm(i.start_min),
+                        "minutes": str(i.duration_min),
+                        "origin": f"{origin[0]}:{origin[1]}",
+                        "usual": usual_label(origin),
+                    }
+                )
+        if rows:
+            blocks.append(BlockGroup(b, rows))
+    events = [
+        {"title": i.title, "day": str(i.weekday), "time": hhmm(i.start_min), "minutes": str(i.duration_min)}
+        for i in items
+        if i.kind == "event"
+    ]
+    return PlanForm(tactic_groups(repo, cycle, week_no, items), blocks, [*events, blank_event(cycle)])
+
+
+def posted_form(repo: Repo, cycle: Cycle, week_no: int, rows: list[FormRow]) -> PlanForm:
     """The planning form as it was posted, to show it again with an error."""
-    groups = {g.tactic.id: g for g in tactic_groups(repo, cycle, week_no, [])}
-    for group in groups.values():
+    tactics = {g.tactic.id: g for g in tactic_groups(repo, cycle, week_no, [])}
+    for group in tactics.values():
         group.rows = []
-    for ref, day, time, length in zip(refs, days, times, minutes, strict=False):
-        if ref.isdigit() and int(ref) in groups:
-            groups[int(ref)].rows.append({"day": day, "time": time, "minutes": length})
-    return list(groups.values())
+    blocks = {b.id: BlockGroup(b) for b in repo.list_blocks(cycle.id)}
+    events = []
+    for row in rows:
+        ref = int(row.ref) if row.ref.isdigit() else None
+        if row.kind == "tactic" and ref in tactics:
+            tactics[ref].rows.append(row.view)
+        elif row.kind == "block" and ref in blocks and (origin := parse_origin(row.origin)):
+            blocks[ref].rows.append(row.view | {"origin": row.origin, "usual": usual_label(origin)})
+        elif row.kind == "event":
+            events.append(row.view)
+    return PlanForm(list(tactics.values()), [b for b in blocks.values() if b.rows], events or [blank_event(cycle)])
 
 
-def parse_week_rows(
-    cycle: Cycle,
-    week_no: int,
-    tactics: list[Tactic],
-    kinds: list[str],
-    refs: list[str],
-    days: list[str],
-    times: list[str],
-    minutes: list[str],
+def parse_plan_rows(
+    cycle: Cycle, week_no: int, tactics: list[Tactic], blocks: list[Block], rows: list[FormRow]
 ) -> list[WeekItem]:
-    """Tactic sessions from the planning form's parallel lists. Rows without a time are skipped."""
-    by_id = {t.id: t for t in tactics}
+    """A week's items from the planning form.
+
+    Tactic and event rows without a time are left out. A block row without a time is that
+    occurrence skipped this week; one at another time, or for another length, is moved.
+    """
+    tactic_by_id = {t.id: t for t in tactics}
+    block_by_id = {b.id: b for b in blocks}
     nth: Counter = Counter()
     items: list[WeekItem] = []
-    for kind, ref, day, time, length in zip(kinds, refs, days, times, minutes, strict=False):
-        tactic = by_id.get(int(ref)) if kind == "tactic" and ref.isdigit() else None
-        if tactic is None:
-            raise FormError("A tactic on this page has changed. Reload the page and try again.")
-        nth[tactic.id] += 1
-        if not time.strip():
-            continue
+
+    def slot_for(row: FormRow, label: str):
         try:
-            slot = parse_slot_row(day, time, length)
+            return parse_slot_row(row.day, row.time, row.minutes)
         except FormError as e:
-            raise FormError(f"{tactic.title}, time {nth[tactic.id]}: {e}") from None
-        items.append(
-            WeekItem(
+            raise FormError(f"{label}: {e}") from None
+
+    for row in rows:
+        ref = int(row.ref) if row.ref.isdigit() else None
+        if row.kind == "tactic":
+            tactic = tactic_by_id.get(ref)
+            if tactic is None:
+                raise FormError(STALE)
+            nth[tactic.id] += 1
+            if row.time.strip():
+                slot = slot_for(row, f"{tactic.title}, time {nth[tactic.id]}")
+                items.append(
+                    WeekItem(
+                        cycle.id,
+                        week_no,
+                        "tactic",
+                        *slot_fields(slot),
+                        tactic_id=tactic.id,
+                        title=tactic.title,
+                    )
+                )
+        elif row.kind == "block":
+            block, origin = block_by_id.get(ref), parse_origin(row.origin)
+            if block is None or origin is None:
+                raise FormError(STALE)
+            usual = next((s for s in block.slots if (s.weekday, s.start_min) == origin), None)
+            base = WeekItem(
                 cycle.id,
                 week_no,
-                "tactic",
-                slot.weekday,
-                slot.start_min,
-                slot.duration_min,
-                tactic_id=tactic.id,
-                title=tactic.title,
+                "block",
+                origin[0],
+                origin[1],
+                usual.duration_min if usual else 30,
+                block_id=block.id,
+                title=block.title,
+                orig_weekday=origin[0],
+                orig_start_min=origin[1],
             )
-        )
+            if not row.time.strip():
+                items.append(replace(base, skipped=True, custom=True))
+                continue
+            slot = slot_for(row, f"{block.title} (usually {usual_label(origin)})")
+            moved = slot_fields(slot) != (base.weekday, base.start_min, base.duration_min)
+            items.append(
+                replace(
+                    base, weekday=slot.weekday, start_min=slot.start_min, duration_min=slot.duration_min, custom=moved
+                )
+            )
+        elif row.kind == "event":
+            nth["event"] += 1
+            title = row.title.strip()[:EVENT_TITLE_MAX]
+            if not row.time.strip():
+                if title:
+                    raise FormError(f"“{title}” needs a start time.")
+                continue
+            if not title:
+                raise FormError(f"Event {nth['event']}: give it a name.")
+            slot = slot_for(row, f"“{title}”")
+            items.append(WeekItem(cycle.id, week_no, "event", *slot_fields(slot), title=title))
+        else:
+            raise FormError(STALE)
     return items
 
 
-def save_week_plan(repo: Repo, cycle: Cycle, week_no: int, today: date, tactic_items: list[WeekItem]) -> None:
-    """Save a week's tactic sessions, keeping its block occurrences as they stand, and mark it planned."""
+def slot_fields(slot) -> tuple[int, int, int]:
+    return slot.weekday, slot.start_min, slot.duration_min
+
+
+def save_week_plan(repo: Repo, cycle: Cycle, week_no: int, today: date, items: list[WeekItem]) -> None:
+    """Save a week's plan, as posted from the planning page, and mark the week planned.
+
+    A block with no rows in `items` wasn't on the page (say, added in another tab), so its
+    occurrences are kept as they stand. Skipping one is a row too, so nothing is lost by accident.
+    """
     if week_no not in plannable_weeks(cycle, today) or week_ended(cycle, week_no, today):
         raise FormError(f"Week {week_no} can't be planned now.")
-    others = [i for i in resolved_items(repo, cycle, week_no) if i.kind != "tactic"]
-    repo.replace_week_items(cycle.id, week_no, "plan", tactic_items + others)
+    posted = {i.block_id for i in items if i.kind == "block"}
+    kept = [i for i in resolved_items(repo, cycle, week_no) if i.kind == "block" and i.block_id not in posted]
+    repo.replace_week_items(cycle.id, week_no, "plan", items + kept)
 
 
 def copy_prev_items(repo: Repo, cycle: Cycle, week_no: int) -> list[WeekItem] | None:
-    """Last week's tactic times for the tactics active this week, or None if last week wasn't planned."""
+    """Last week's tactic times for the tactics active this week, or None if last week wasn't planned.
+
+    Blocks and events aren't copied: they stay as this week has them.
+    """
     if week_no <= 1 or week_no - 1 not in repo.planned_weeks(cycle.id):
         return None
     active = {t.id for t in active_tactics(repo, cycle, week_no)}
@@ -175,22 +321,33 @@ def copy_prev_items(repo: Repo, cycle: Cycle, week_no: int) -> list[WeekItem] | 
     ]
 
 
-def week_plan_check(
-    repo: Repo, cycle: Cycle, week_no: int, refs: list[str], days: list[str], times: list[str], minutes: list[str]
-) -> dict:
+def week_plan_check(repo: Repo, cycle: Cycle, week_no: int, rows: list[FormRow]) -> dict:
     """Live hints for the planning form: clashes per row, and how many sessions each tactic has placed."""
     tactics = {t.id: t for t in active_tactics(repo, cycle, week_no)}
-    rows: list[Placed | None] = []
-    for n, (ref, slot) in enumerate(zip(refs, form_slots(days, times, minutes), strict=False), start=1):
-        tactic = tactics.get(int(ref)) if ref.isdigit() else None
-        rows.append(
-            None
-            if slot is None or tactic is None
-            else Placed(tactic.title, "tactic", tactic.id, (week_no,) * 2, slot, n)
-        )
-    others = placed_for_week(week_no, [i for i in resolved_items(repo, cycle, week_no) if i.kind != "tactic"])
-    placed = Counter(str(p.owner_id) for p in rows if p is not None)
-    return {"rows": clash_hints(rows, others, repo.day_window), "placed": {str(t): placed[str(t)] for t in tactics}}
+    blocks = {b.id: b for b in repo.list_blocks(cycle.id)}
+    slots = form_slots([r.day for r in rows], [r.time for r in rows], [r.minutes for r in rows])
+    placed_rows: list[Placed | None] = []
+    for n, (row, slot) in enumerate(zip(rows, slots, strict=True), start=1):
+        ref = int(row.ref) if row.ref.isdigit() else None
+        if row.kind == "tactic" and ref in tactics:
+            owner = (tactics[ref].title, "tactic", ref)
+        elif row.kind == "block" and ref in blocks:
+            owner = (blocks[ref].title, "block", ref)
+        elif row.kind == "event":
+            owner = (row.title.strip() or "an event", "event", None)
+        else:
+            owner = None
+        placed_rows.append(None if slot is None or owner is None else Placed(*owner, (week_no, week_no), slot, n))
+    posted = {int(r.ref) for r in rows if r.kind == "block" and r.ref.isdigit()}
+    others = placed_for_week(
+        week_no,
+        [i for i in resolved_items(repo, cycle, week_no) if i.kind == "block" and i.block_id not in posted],
+    )
+    placed = Counter(p.owner_id for p in placed_rows if p is not None and p.owner == "tactic")
+    return {
+        "rows": clash_hints(placed_rows, others, repo.day_window),
+        "placed": {str(t): placed[t] for t in tactics},
+    }
 
 
 # -- keeping open plans in step with the 12-week plan -----------------------------

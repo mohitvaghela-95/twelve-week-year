@@ -41,7 +41,13 @@ def utc_stamp(local: datetime, tz: tzinfo | None) -> str:
 def describe(s: Session) -> str:
     if s.owner == "tactic":
         return f"Goal: {s.context}\nWeek {s.week_no} of {EXECUTION_WEEKS}"
+    if s.owner == "event":
+        return f"Planned around in week {s.week_no}"
     return BLOCK_KINDS.get(s.kind, s.kind)
+
+
+def category(s: Session) -> str:
+    return {"tactic": "Tactic", "event": "Event"}.get(s.owner) or BLOCK_KINDS.get(s.kind, s.kind)
 
 
 def render_calendar(sessions: Iterable[Session], alert_minutes: int, now: datetime, tz: tzinfo | None = None) -> str:
@@ -65,7 +71,7 @@ def render_calendar(sessions: Iterable[Session], alert_minutes: int, now: dateti
             f"DTEND:{utc_stamp(s.end, tz)}",
             f"SUMMARY:{escape(s.title)}",
             f"DESCRIPTION:{escape(describe(s))}",
-            f"CATEGORIES:{escape('Tactic' if s.owner == 'tactic' else BLOCK_KINDS.get(s.kind, s.kind))}",
+            f"CATEGORIES:{escape(category(s))}",
             "TRANSP:OPAQUE",
         ]
         if alert_minutes > 0:

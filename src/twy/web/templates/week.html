@@ -3,7 +3,7 @@
 {% block body_class %}wide{% endblock %}
 {#- Tactic sessions open this week's plan while it can still change; blocks open their weekly times. -#}
 {% macro edit_url(s) -%}
-{%- if read_only %}{% elif s.owner == "tactic" %}{{ plan_url if can_plan }}{% elif s.owner_id %}{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}{% endif -%}
+{%- if read_only %}{% elif s.owner in ("tactic", "event") %}{{ plan_url if can_plan }}{% elif s.owner_id %}{{ url_for('web.block_edit', cycle_id=cycle.id, block_id=s.owner_id) }}{% endif -%}
 {%- endmacro %}
 {% macro session_tag(s) -%}{{ "a" if edit_url(s) else "div" }}{%- endmacro %}
 {#- With JavaScript, tapping a session shows its details first (#session-pop); the link to edit is the fallback. -#}
@@ -11,7 +11,7 @@
 {% if edit_url(s) %} href="{{ edit_url(s) }}" data-session data-title="{{ s.title }}"
   data-when="{{ s.day.strftime('%A') }} {{ s.start_min|hhmm }}–{{ s.end_min|hhmm }}"
   data-what="{{ s.context or kinds.get(s.kind, 'Tactic') }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(', ') }}{% endif %}"
-  data-edit-label="Edit {{ 'week plan' if s.owner == 'tactic' else 'block' }}"{% endif %}
+  data-edit-label="Edit {{ 'block' if s.owner == 'block' else 'week plan' }}"{% endif %}
 {%- endmacro %}
 {% block content %}
 <div class="page-head">
@@ -58,7 +58,7 @@
     {% for s in items %}
     <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
-      <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds[s.kind] }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
+      <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
     {% else %}
     <p class="muted small">Nothing scheduled.</p>

@@ -17,8 +17,8 @@ class Session:
     start_min: int
     duration_min: int
     title: str
-    kind: str  # "tactic", or the block's kind (admin, chores, breakout, review, other)
-    owner: str  # "tactic" | "block"
+    kind: str  # "tactic", "event", or the block's kind (admin, chores, breakout, review, other)
+    owner: str  # "tactic" | "block" | "event"
     owner_id: int | None  # None once the tactic or block has been deleted
     key: str  # stable identity for calendar apps; see sessions_from_items
     cycle_id: int
@@ -81,7 +81,7 @@ def sessions_from_items(
     """Dated sessions for a week's items (skipped block occurrences left out).
 
     `goal_titles` maps tactic id → its goal, `block_kinds` block id → kind. Keys stay put when a week
-    is planned or re-saved: a tactic's sessions are numbered in time order, and a block occurrence is
+    is planned or re-saved: a tactic's sessions (and the week's events) are numbered in time order, and a block occurrence is
     named after the weekly slot it came from, so moving it this week updates the same calendar event.
     """
     sessions: list[Session] = []
@@ -93,6 +93,10 @@ def sessions_from_items(
             owner_id, kind, context = item.tactic_id, "tactic", goal_titles.get(item.tactic_id, "")
             nth[item.tactic_id] += 1
             key = f"tactic-{item.tactic_id}-w{week_no}-{nth[item.tactic_id]}" if item.tactic_id else f"item-{item.id}"
+        elif item.kind == "event":
+            owner_id, kind, context = None, "event", ""
+            nth["event"] += 1
+            key = f"event-c{cycle.id}-w{week_no}-{nth['event']}"
         else:
             owner_id, kind, context = item.block_id, block_kinds.get(item.block_id, "other"), ""
             weekday = item.weekday if item.orig_weekday is None else item.orig_weekday

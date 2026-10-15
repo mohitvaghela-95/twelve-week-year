@@ -415,6 +415,63 @@ def test_clash_hints_and_plan_warnings(client, db_path):
     assert post(client, f"{base}/week/1/plan/check", {}).status_code == 403
 
 
+def test_week_plan_skips_moves_blocks_and_adds_events(client, db_path):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Q4", date(2026, 10, 12), 0)  # TODAY (Wed 14 Oct) is in week 1
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=1))
+    base = f"/c/{cycle.id}"
+    admin = {"title": "Admin", "kind": "admin", "slot_day": ["0", "2"], "slot_time": ["08:00"] * 2}
+    post(client, f"{base}/blocks/new", {**admin, "slot_minutes": ["30", "30"]})
+    admin_id = repo.list_blocks(cycle.id)[0].id
+
+    page = client.get(f"{base}/week/1/plan").text
+    assert "Usually Mon 08:00" in page and "Usually Wed 08:00" in page and "Events this week" in page
+
+    form = {
+        "slot_kind": ["tactic", "block", "block", "event", "event"],
+        "slot_ref": [str(run.id), str(admin_id), str(admin_id), "", ""],
+        "slot_origin": ["", "0:480", "2:480", "", ""],
+        "slot_title": ["", "", "", "Dinner with Sam", ""],
+        "slot_day": ["1", "0", "2", "4", "0"],
+        "slot_time": ["07:00", "08:30", "", "19:00", ""],
+        "slot_minutes": ["30", "30", "30", "120", "60"],
+    }
+    bad = {**form, "slot_title": ["", "", "", "", ""]}
+    response = post(client, f"{base}/week/1/plan", bad)
+    assert response.status_code == 422 and "Event 1: give it a name." in response.text
+    assert "Skipped this week · usually Wed 08:00" in response.text  # the skip survives the error
+    assert post(client, f"{base}/week/1/plan", form).location == f"{base}/week/1"
+
+    page = client.get(f"{base}/week/1").text
+    assert "Dinner with Sam" in page and "08:30" in page
+    week = [(i.kind, i.title, i.weekday, i.start_min, i.skipped) for i in repo.week_items(cycle.id, 1)]
+    assert week == [
+        ("block", "Admin", 0, 510, False),
+        ("tactic", "Run", 1, 420, False),
+        ("block", "Admin", 2, 480, True),
+        ("event", "Dinner with Sam", 4, 1140, False),
+    ]
+    # Re-opening the plan shows the move, the skip and the event, plus a blank row for another event.
+    page = client.get(f"{base}/week/1/plan").text
+    assert "Skipped this week · usually Wed 08:00" in page and 'value="Dinner with Sam"' in page
+
+    # The calendar: Run, Monday's moved Admin and the dinner; the skipped Wednesday is left out.
+    feed = client.application.test_client().get(f"/calendar/{repo.calendar_token}.ics").text
+    assert feed.count("BEGIN:VEVENT") == 3
+    assert "SUMMARY:Dinner with Sam" in feed and "CATEGORIES:Event" in feed
+    assert f"UID:block-{admin_id}-20261012-480@twy" in feed  # moved, but still Monday's 08:00 slot
+
+    # Changing Admin's weekly times keeps this week's skip and move.
+    post(client, f"{base}/blocks/{admin_id}/edit", {**admin, "slot_minutes": ["45", "45"]})
+    assert [(i.weekday, i.start_min, i.skipped) for i in repo.week_items(cycle.id, 1) if i.kind == "block"] == [
+        (0, 510, False),
+        (2, 480, True),
+    ]
+
+
 def test_open_plans_follow_tactic_and_block_changes(client, db_path):
     login(client)
     repo = repo_for(db_path)

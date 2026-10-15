@@ -57,6 +57,7 @@
   :root .kind-breakout { --kind: #69db7c; }
   :root .kind-review { --kind: #da77f2; }
   :root .kind-other { --kind: #3bc9db; }
+  :root .kind-event { --kind: #f06595; }
 }
 
 * { box-sizing: border-box; }
@@ -548,6 +549,8 @@ body.onboarding { padding-bottom: 24px; }
 .busy-day h3 { margin: 0; font-size: 0.95rem; }
 .busy-day.today h3 { color: var(--accent); }
 .busy-day p { margin: 4px 0 0; }
+.slots .slot-title { grid-column: 1 / -1; }
+.slot-usual { grid-column: 1 / -1; margin: -2px 0 0; }
 
 .kind-tactic { --kind: var(--accent); }
 .kind-admin { --kind: #868e96; }
@@ -555,6 +558,7 @@ body.onboarding { padding-bottom: 24px; }
 .kind-breakout { --kind: #2f9e44; }
 .kind-review { --kind: #ae3ec9; }
 .kind-other { --kind: #1098ad; }
+.kind-event { --kind: #d6336c; }
 .kind-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--kind); margin-right: 6px; vertical-align: 0; }
 
 .week-summary { font-weight: 600; }
