@@ -21,7 +21,7 @@ On a phone the tab bar holds Home, Today, Plan, Review and More (Week, Trend, We
 
 When you open a week's review, each tactic's done count starts from that week's daily logs, and you can still change it before saving. Once saved, the review is the record that the score uses. A tactic whose logs differ from its saved count shows “N logged on Today”.
 
-The questions in the daily reflection and in the weekly review are set in Settings → **Reflection prompts**. Each one is free text, a 1–5 rating or yes/no. Add, rename, reorder, hide or delete them as you like. Answers keep the wording they were saved under, so editing or deleting a prompt never changes past reviews.
+The questions in the daily reflection and in the weekly review are set in Settings → **Reflection prompts**. The defaults follow the book. Each day: did you check your weekly plan, what got in the way, and did you keep your commitments to yourself? Each week: what you accomplished, what got in the way if you executed under 85%, whether your tactics are moving your lag measures, and what you'll do differently. Each one is free text, a 1–5 rating or yes/no. Add, rename, reorder, hide or delete them as you like. Answers keep the wording they were saved under, so editing or deleting a prompt never changes past reviews.
 
 ## Calendar
 

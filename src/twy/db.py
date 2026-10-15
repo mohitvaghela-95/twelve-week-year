@@ -6,13 +6,17 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
-# The reflection prompts a new database starts with (v3 inserts them; a factory reset puts them back).
+# The reflection prompts a new database starts with (v3 inserted the original set and v6 swaps in
+# this one; a factory reset puts them back). They follow The 12 Week Year: check the weekly plan
+# each day, and each week ask why execution fell short of 85% and whether the tactics need to change.
 DEFAULT_PROMPTS: list[tuple[str, str, str]] = [  # (scope, label, kind), in order within each scope
-    ("daily", "What went well?", "text"),
-    ("daily", "What got in the way?", "text"),
-    ("daily", "Top tactics for tomorrow", "text"),
-    ("weekly", "What got in the way?", "text"),
-    ("weekly", "One fix for next week", "text"),
+    ("daily", "Did I review my weekly plan this morning?", "yesno"),
+    ("daily", "What got in the way of today's tactics?", "text"),
+    ("daily", "Did I keep the commitments I made to myself today?", "yesno"),
+    ("weekly", "What did I accomplish this week?", "text"),
+    ("weekly", "If I executed under 85%, what got in the way?", "text"),
+    ("weekly", "Are my tactics moving my lag measures, or do they need to change?", "text"),
+    ("weekly", "What will I do differently next week?", "text"),
 ]
 
 MIGRATIONS: list[str] = [
@@ -225,6 +229,29 @@ MIGRATIONS: list[str] = [
     CREATE INDEX week_item_week ON week_item (cycle_id, week_no, layer);
     CREATE INDEX week_item_tactic ON week_item (tactic_id);
     CREATE INDEX week_item_block ON week_item (block_id);
+    """,
+    # v6: default reflection prompts that follow the book. The v3 defaults go unless they were edited
+    # (hidden ones too); answers keep their wording. The new ones go first, ahead of any kept prompts.
+    """
+    DELETE FROM prompt WHERE (scope, label, kind) IN (VALUES
+        ('daily', 'What went well?', 'text'),
+        ('daily', 'What got in the way?', 'text'),
+        ('daily', 'Top tactics for tomorrow', 'text'),
+        ('weekly', 'What got in the way?', 'text'),
+        ('weekly', 'One fix for next week', 'text'));
+    UPDATE prompt SET position = position + 3 WHERE scope = 'daily';
+    UPDATE prompt SET position = position + 4 WHERE scope = 'weekly';
+    WITH new (scope, position, label, kind) AS (VALUES
+        ('daily', 0, 'Did I review my weekly plan this morning?', 'yesno'),
+        ('daily', 1, 'What got in the way of today''s tactics?', 'text'),
+        ('daily', 2, 'Did I keep the commitments I made to myself today?', 'yesno'),
+        ('weekly', 0, 'What did I accomplish this week?', 'text'),
+        ('weekly', 1, 'If I executed under 85%, what got in the way?', 'text'),
+        ('weekly', 2, 'Are my tactics moving my lag measures, or do they need to change?', 'text'),
+        ('weekly', 3, 'What will I do differently next week?', 'text'))
+    INSERT INTO prompt (scope, position, label, kind)
+        SELECT scope, position, label, kind FROM new
+        WHERE NOT EXISTS (SELECT 1 FROM prompt p WHERE p.scope = new.scope AND p.label = new.label);
     """,
 ]
 
