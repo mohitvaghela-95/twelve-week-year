@@ -15,7 +15,7 @@ from datetime import date
 from itertools import zip_longest
 
 from twy.calendars import all_day_dates, busy, day_spans
-from twy.domain.compare import Change, comparable, compare, summary, when
+from twy.domain.compare import Change, comparable, compare, log_hints, summary, when
 from twy.domain.conflicts import Placed, placed_for_week
 from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, current_week, week_range
 from twy.domain.schedule import Session, planning_offset, sessions_from_items, template_items
@@ -566,6 +566,79 @@ def save_actual(repo: Repo, cycle: Cycle, week_no: int, today: date, items: list
         return False
     repo.replace_week_items(cycle.id, week_no, "actual", items)
     return True
+
+
+def rows_of(form: PlanForm) -> list[FormRow]:
+    """The rows a rendered form posts, in page order: tactics, blocks, then events."""
+    rows = [
+        FormRow("tactic", str(g.tactic.id), "", "", r["day"], r["time"], r["minutes"], r.get("plan", ""))
+        for g in form.tactics
+        for r in g.rows
+    ]
+    rows += [
+        FormRow("block", str(g.block.id), r["origin"], "", r["day"], r["time"], r["minutes"], r.get("plan", ""))
+        for g in form.blocks
+        for r in g.rows
+    ]
+    return rows + [FormRow("event", "", "", r["title"], r["day"], r["time"], r["minutes"]) for r in form.events]
+
+
+def _item_key(items: list[WeekItem]) -> list[tuple]:
+    def n(value: int | None) -> int:
+        return -1 if value is None else value
+
+    return sorted(
+        (i.kind, n(i.tactic_id), n(i.block_id), n(i.plan_item_id), i.weekday, i.start_min, i.duration_min)
+        for i in items
+    )
+
+
+@dataclass
+class ReviewRecord:
+    """The weekly review's "What happened" section."""
+
+    record: WeekRecord
+    summary: str
+    hints: list[str]
+    form: PlanForm | None  # None while the week is on, or once the cycle is closed
+
+
+def review_record(repo: Repo, cycle: Cycle, week_no: int, today: date) -> ReviewRecord | None:
+    """What happened against the plan, for the review, or None for a week with nothing to show."""
+    record = week_record(repo, cycle, week_no)
+    if not (record.planned or record.recorded or active_tactics(repo, cycle, week_no)):
+        return None
+    if not week_ended(cycle, week_no, today):
+        text = "Record what happened once the week is over."
+    elif record.planned:
+        text = (
+            f"Against the plan: {summary(record.changes)}."
+            if record.recorded
+            else "Not recorded yet, so taken as planned."
+        )
+    else:
+        text = "Recorded, but the week wasn't planned." if record.recorded else "This week wasn't planned."
+    hints = []
+    if week_ended(cycle, week_no, today):
+        first, last = week_range(cycle.start_date, week_no)
+        titles = {t.id: t.title for t in repo.list_tactics(cycle.id)}
+        hints = log_hints(record.changes, repo.logged_between(cycle.id, first, last), titles)
+    form = actual_form(repo, cycle, week_no, record) if recordable(cycle, week_no, today) else None
+    return ReviewRecord(record, text, hints, form)
+
+
+def parse_review_record(repo: Repo, cycle: Cycle, week_no: int, rows: list[FormRow]) -> list[WeekItem] | None:
+    """What happened, as posted with the review, or None if the section was left as it was shown.
+
+    Leaving it alone mustn't record anything: for a week that wasn't planned, the shown rows
+    would otherwise become a record of their own.
+    """
+    record = week_record(repo, cycle, week_no)
+    tactics, blocks = repo.list_tactics(cycle.id), repo.list_blocks(cycle.id)
+    posted = parse_plan_rows(cycle, week_no, tactics, blocks, rows, record.plan_by_id)
+    shown = rows_of(actual_form(repo, cycle, week_no, record))
+    initial = parse_plan_rows(cycle, week_no, tactics, blocks, shown, record.plan_by_id)
+    return None if _item_key(posted) == _item_key(initial) else posted
 
 
 @dataclass
