@@ -530,6 +530,10 @@ body.onboarding { padding-bottom: 24px; }
 .slots .slot-row { display: grid; grid-template-columns: minmax(4.6em, 1fr) minmax(6.4em, 1.4fr) minmax(3.6em, 0.8fr) 44px; gap: 6px; align-items: center; margin-top: 8px; }
 .slots .slot-head { margin: 4px 0 -4px; font-weight: 600; }
 .slot-row input, .slot-row select { padding-left: 8px; padding-right: 6px; min-width: 0; }
+/* The smallest phones (320px): let the columns shrink rather than scroll the page sideways. */
+@media (max-width: 359px) {
+  .slots .slot-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 0.8fr) 36px; }
+}
 .slot-note { grid-column: 1 / -1; color: var(--warn); font-size: 0.85rem; }
 .slot-note p { margin: 2px 0; }
 .slot-fixes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -552,6 +556,25 @@ body.onboarding { padding-bottom: 24px; }
 .slots .slot-title { grid-column: 1 / -1; }
 .slot-usual { grid-column: 1 / -1; margin: -2px 0 0; }
 
+/* Events from your other calendars: greyed, dashed, read-only. */
+.session.kind-import, .tl-item.kind-import { border-left-style: dashed; opacity: 0.75; }
+.allday { margin: 4px 0 0; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.import-error { color: var(--warn); }
+.tl-allday { display: flex; flex-direction: column; gap: 2px; height: 34px; margin-bottom: 4px; overflow: hidden; }
+.timeline.has-allday .tl-hours { margin-top: 70px; } /* .tl-head 32px + .tl-allday 38px */
+.tl-allday .allday { margin: 0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Plan vs what happened: the plan's outline where a session was meant to be, and a tag on what changed. */
+.compare-summary { font-weight: 600; }
+.compare-summary .muted { display: block; font-weight: 400; }
+.badge { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--warn-bg); color: var(--warn); vertical-align: 1px; }
+.session.ghost { background: transparent; border-left-style: dashed; opacity: 0.6; }
+.session.ghost strong { text-decoration: line-through; }
+.tl-item { z-index: 1; }
+.tl-item.tl-ghost { z-index: 0; background: transparent; border: 1.5px dashed var(--kind); opacity: 0.55; }
+.reset-actual { margin-top: 12px; }
+.what-happened details summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
+
 .kind-tactic { --kind: var(--accent); }
 .kind-admin { --kind: #868e96; }
 .kind-chores { --kind: #e67700; }
@@ -559,6 +582,7 @@ body.onboarding { padding-bottom: 24px; }
 .kind-review { --kind: #ae3ec9; }
 .kind-other { --kind: #1098ad; }
 .kind-event { --kind: #d6336c; }
+.kind-import { --kind: #868e96; }
 .kind-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--kind); margin-right: 6px; vertical-align: 0; }
 
 .week-summary { font-weight: 600; }

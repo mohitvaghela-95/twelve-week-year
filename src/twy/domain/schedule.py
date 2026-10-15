@@ -24,6 +24,7 @@ class Session:
     cycle_id: int
     week_no: int
     context: str = ""  # the goal, for tactics
+    item_id: int | None = None  # the stored week item it came from (None before a week is planned)
 
     @property
     def end_min(self) -> int:
@@ -116,6 +117,7 @@ def sessions_from_items(
                 cycle_id=cycle.id or 0,
                 week_no=week_no,
                 context=context,
+                item_id=item.id,
             )
         )
     return sorted(sessions, key=lambda s: (s.day, s.start_min, s.title))

@@ -7,7 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0",
     "gunicorn>=22.0",
+    "icalendar>=6",
     "platformdirs>=4.0",
+    "recurring-ical-events>=3",
 ]
 
 [project.scripts]
