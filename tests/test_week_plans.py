@@ -12,11 +12,14 @@ from twy.week_plans import (
     form_rows,
     next_week_to_plan,
     parse_plan_rows,
+    parse_review_record,
     plan_form,
     plannable_weeks,
     posted_form,
     recordable,
     resolved_items,
+    review_record,
+    rows_of,
     save_actual,
     save_week_plan,
     shortfall,
@@ -336,3 +339,35 @@ def test_an_unplanned_week_can_still_be_recorded(repo):
     assert record.recorded and not record.planned and record.changes == []
     view = week_view(repo, cycle, 1, after)
     assert [s.title for s in view.sessions] == ["Run"] and view.summary is None and view.ghosts == []
+
+
+def test_review_record_summaries_and_hints(repo):
+    cycle, run, _admin = planned_week_one(repo)
+    during, after = MON + timedelta(days=3), MON + timedelta(days=8)
+    assert review_record(repo, cycle, 1, during).summary == "Record what happened once the week is over."
+    assert review_record(repo, cycle, 1, during).form is None and review_record(repo, cycle, 1, during).hints == []
+    repo.log_tactic(run.id, MON, 1)
+    section = review_record(repo, cycle, 1, after)
+    assert section.summary == "Not recorded yet, so taken as planned."
+    assert section.hints == ["Run: 2 in the calendar, 1 logged on Today. 1 may not have happened."]
+    assert section.form is not None
+    assert review_record(repo, replace(cycle, status="closed"), 1, after).form is None
+
+    later, _run2, _mocks2 = setup(repo, start=MON + timedelta(weeks=20))
+    assert review_record(repo, later, 1, later.start_date + timedelta(days=8)).summary == "This week wasn't planned."
+
+
+def test_review_saves_what_happened_only_if_it_was_changed(repo):
+    cycle, _run, _admin = planned_week_one(repo)
+    shown = rows_of(review_record(repo, cycle, 1, MON + timedelta(days=8)).form)
+    assert parse_review_record(repo, cycle, 1, shown) is None  # left as it was
+    changed = [replace(shown[1], time="")] + shown[:1] + shown[2:]  # Wednesday's run didn't happen
+    items = parse_review_record(repo, cycle, 1, changed)
+    assert items is not None and len(items) == len(shown) - 1
+
+    # A week that wasn't planned: leaving the section alone records nothing.
+    later, run2, _mocks2 = setup(repo, start=MON + timedelta(weeks=20))
+    shown = rows_of(review_record(repo, later, 1, later.start_date + timedelta(days=8)).form)
+    assert parse_review_record(repo, later, 1, shown) is None
+    ran = [replace(shown[0], time="18:00")]
+    assert [i.tactic_id for i in parse_review_record(repo, later, 1, ran)] == [run2.id]

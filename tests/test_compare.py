@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from twy.domain.compare import compare, summary
+from twy.domain.compare import compare, log_hints, summary
 from twy.models import WeekItem
 
 MON, TUE, WED = 0, 1, 2
@@ -53,3 +53,19 @@ def test_skipped_blocks_events_and_deleted_tactics_are_not_compared():
 def test_a_row_linked_to_a_plan_row_that_is_gone_counts_as_added():
     [change] = compare([], [run(MON, 420, 11, plan_item_id=99, layer="actual")])
     assert change.status == "added"
+
+
+def test_log_hints_only_when_fewer_were_logged_than_happened():
+    plan = [run(MON, 420, 1), run(WED, 420, 2)]
+    titles = {7: "Run"}
+    assert log_hints(compare(plan, None), {7: 1}, titles) == [
+        "Run: 2 in the calendar, 1 logged on Today. 1 may not have happened."
+    ]
+    assert log_hints(compare(plan, None), {7: 2}, titles) == []
+    assert log_hints(compare(plan, None), {7: 5}, titles) == []  # logging more than planned is fine
+    # Once recorded, only what happened counts: one session didn't, so one log is enough.
+    actual = [run(MON, 420, 11, plan_item_id=1, layer="actual")]
+    assert log_hints(compare(plan, actual), {7: 1}, titles) == []
+    assert log_hints(compare(plan, actual), {}, titles) == [
+        "Run: 1 in the calendar, 0 logged on Today. 1 may not have happened."
+    ]

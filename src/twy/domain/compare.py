@@ -6,7 +6,8 @@ moved close to another of the same tactic can't be mistaken for it. Tactic sessi
 block occurrences are compared; one-off events are context only.
 """
 
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from twy.models import WEEKDAY_SHORT, WeekItem, hhmm
@@ -88,3 +89,20 @@ def summary(changes: Iterable[Change]) -> str:
     ]
     text = ", ".join(f"{n} {what}" for n, what in parts if n)
     return text or "Went to plan"
+
+
+def log_hints(changes: Iterable[Change], logged: Mapping[int, int], titles: Mapping[int, str]) -> list[str]:
+    """Tactics with fewer sessions logged on Today than happened in the calendar.
+
+    A nudge for the weekly review, never a correction: the gap may be a missed session to
+    record, or one done but not logged. `logged` and `titles` are keyed by tactic id.
+    """
+    sessions = Counter(c.actual.tactic_id for c in changes if c.actual is not None and c.actual.kind == "tactic")
+    hints = []
+    for tactic_id, n in sessions.items():
+        done = logged.get(tactic_id, 0)
+        if done < n and tactic_id in titles:
+            hints.append(
+                f"{titles[tactic_id]}: {n} in the calendar, {done} logged on Today. {n - done} may not have happened."
+            )
+    return hints

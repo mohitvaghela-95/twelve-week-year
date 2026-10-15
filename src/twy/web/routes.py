@@ -103,11 +103,13 @@ from twy.week_plans import (
     imports_for_week,
     next_week_to_plan,
     parse_plan_rows,
+    parse_review_record,
     plan_form,
     plannable_weeks,
     posted_form,
     recordable,
     resolved_items,
+    review_record,
     save_actual,
     save_week_plan,
     shortfall,
@@ -984,11 +986,17 @@ def review(cycle_id: int, week_no: int):
     lag_goals = [g for g in r.list_goals(cycle.id) if g.measurable]
     items = reflection_items(r.list_prompts("weekly", active_only=True), existing.answers if existing else [])
     values = {f"lag-{g.id}": fmt_num(r.goal_progress(g.id).get(week_no)) for g in lag_goals}
+    what_happened = review_record(r, cycle, week_no, today())
     error = None
 
     if request.method == "POST":
         if read_only:
             abort(403, "This cycle is closed and read-only.")
+        # "What happened" is part of the same form: checked first, saved only if it was changed.
+        record_rows = (
+            posted_plan_rows() if what_happened and what_happened.form and "record_present" in request.form else None
+        )
+        happened = None
         done = {}
         for row in rows:
             if row.tactic_id is None:
@@ -1005,12 +1013,21 @@ def review(cycle_id: int, week_no: int):
                 progress = {g.id: parse_float(values[f"lag-{g.id}"]) for g in lag_goals}
             except ValueError:
                 raise FormError("Lag measures must be numbers.") from None
+            if record_rows is not None:
+                try:
+                    happened = parse_review_record(r, cycle, week_no, record_rows)
+                except FormError as e:
+                    raise FormError(f"What happened: {e}") from None
         except FormError as e:
             error = str(e)
             for row, entry in zip(rows, entries):
                 row.done = entry.done
+            if record_rows is not None:
+                what_happened.form = posted_form(r, cycle, week_no, record_rows, what_happened.record.plan_by_id)
         else:
             score = save_week(r, cycle, week_no, entries, answers, progress)
+            if happened is not None:
+                save_actual(r, cycle, week_no, today(), happened)
             pending = pending_weeks(r, cycle, today())
             if pending:
                 # Catching up: go straight on to the next week still to score.
@@ -1042,6 +1059,10 @@ def review(cycle_id: int, week_no: int):
         error=error,
         read_only=read_only,
         in_progress=current_week(cycle.start_date, today()).week_no,
+        what_happened=what_happened,
+        record_open=bool(error and request.method == "POST" and "record_present" in request.form)
+        or bool(what_happened and (what_happened.hints or what_happened.record.recorded)),
+        record_url=url_for(".week_actual", cycle_id=cycle.id, week_no=week_no, next=request.path),
         tab="review",
     ), 422 if error else 200
 
