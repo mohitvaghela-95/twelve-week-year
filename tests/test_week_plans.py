@@ -7,6 +7,7 @@ from twy.models import Block, Goal, Slot, Tactic, WeekItem
 from twy.services import FormError
 from twy.week_plans import (
     FormRow,
+    actual_form,
     copy_prev_items,
     form_rows,
     next_week_to_plan,
@@ -14,13 +15,17 @@ from twy.week_plans import (
     plan_form,
     plannable_weeks,
     posted_form,
+    recordable,
     resolved_items,
+    save_actual,
     save_week_plan,
     shortfall,
     tactic_groups,
     unplanned_reminders,
     week_ended,
     week_plan_check,
+    week_record,
+    week_view,
 )
 
 MON = date(2026, 10, 5)
@@ -211,3 +216,123 @@ def test_reminders_skip_weeks_without_tactics(repo):
     assert unplanned_reminders(repo, cycle, MON) == []
     assert unplanned_reminders(repo, cycle, MON + timedelta(weeks=11)) == [12]
     assert unplanned_reminders(repo, cycle, MON + timedelta(weeks=12)) == []  # week 13: nothing to place
+
+
+# -- what actually happened ---------------------------------------------------------
+
+
+def planned_week_one(repo):
+    """Week 1 planned: Run on Mon and Wed at 07:00, and an Admin block on Friday."""
+    cycle, run, _mocks = setup(repo)
+    admin = repo.save_block(Block(None, cycle.id, "Admin", "admin", slots=[Slot(4, 960, 30)]))
+    template = WeekItem(cycle.id, 1, "block", 4, 960, 30, block_id=admin.id, orig_weekday=4, orig_start_min=960)
+    dinner = WeekItem(cycle.id, 1, "event", 5, 1140, 120, title="Dinner")
+    repo.replace_week_items(
+        cycle.id, 1, "plan", [session(cycle, 1, run, 0), session(cycle, 1, run, 2), template, dinner]
+    )
+    return cycle, run, admin
+
+
+def test_recording_opens_once_the_week_is_over(repo):
+    cycle, _run, _admin = planned_week_one(repo)
+    assert not recordable(cycle, 1, MON + timedelta(days=6))
+    assert recordable(cycle, 1, MON + timedelta(days=7))
+    assert not recordable(replace(cycle, status="closed"), 1, MON + timedelta(days=7))
+    with pytest.raises(FormError, match="can't be recorded now"):
+        save_actual(repo, cycle, 1, MON + timedelta(days=6), [])
+
+
+def test_the_record_form_starts_from_the_plan(repo):
+    cycle, _run, _admin = planned_week_one(repo)
+    record = week_record(repo, cycle, 1)
+    assert record.planned and not record.recorded and len(record.plan_by_id) == 3  # the dinner isn't compared
+    form = actual_form(repo, cycle, 1, record)
+    [run_group] = form.tactics  # the mock race starts in week 3
+    mon, wed = (record.plan[0].id, record.plan[1].id)
+    assert [(r["time"], r["plan"], r["note"]) for r in run_group.rows] == [
+        ("07:00", str(mon), "Planned Mon 07:00"),
+        ("07:00", str(wed), "Planned Wed 07:00"),
+    ]
+    [admin_group] = form.blocks
+    assert admin_group.rows[0]["note"] == "Planned Fri 16:00" and form.events == []
+
+
+def test_record_what_happened_then_compare(repo):
+    cycle, run, admin = planned_week_one(repo)
+    after = MON + timedelta(days=8)
+    record = week_record(repo, cycle, 1)
+    mon, wed, fri = (str(i.id) for i in record.plan if i.kind != "event")
+
+    def tactic(plan, day, time):
+        return FormRow("tactic", str(run.id), day=day, time=time, minutes="60", plan=plan)
+
+    rows = [
+        tactic(mon, "1", "07:00"),  # moved to Tuesday
+        tactic(wed, "2", ""),  # didn't happen
+        tactic("", "5", "09:00"),  # an extra run on Saturday
+        FormRow("block", str(admin.id), "4:960", day="4", time="16:00", minutes="30", plan=fri),
+    ]
+    items = parse_plan_rows(cycle, 1, [run], [admin], rows, record.plan_by_id)
+    assert [(i.layer, i.weekday, i.plan_item_id) for i in items] == [
+        ("actual", 1, int(mon)),
+        ("actual", 5, None),
+        ("actual", 4, int(fri)),
+    ]
+    assert save_actual(repo, cycle, 1, after, items) is True
+    record = week_record(repo, cycle, 1)
+    assert sorted(c.status for c in record.changes) == ["added", "dropped", "kept", "moved"]
+
+    view = week_view(repo, cycle, 1, after)
+    assert view.recorded and view.summary == "1 moved, 1 didn't happen, 1 added"
+    assert sorted(view.badges.values()) == ["added", "moved from Mon 07:00"]
+    assert sorted((g.day.isoformat(), label) for g, label in view.ghosts) == [
+        ("2026-10-05", "moved to Tue 07:00"),
+        ("2026-10-07", "didn't happen"),
+    ]
+    assert "Dinner" in [s.title for s in view.sessions]  # events stay as context
+
+    # The form shows it back: the missed run blank with its plan, the extra marked as added.
+    run_rows = actual_form(repo, cycle, 1, week_record(repo, cycle, 1)).tactics[0].rows
+    assert [(r["time"], r["note"]) for r in run_rows] == [
+        ("07:00", "Planned Mon 07:00"),
+        ("", "Planned Wed 07:00 · didn't happen"),
+        ("09:00", "Added: wasn't in the plan"),
+    ]
+
+    # Recording exactly the plan again means it went to plan: nothing is kept.
+    as_planned = [tactic(mon, "0", "07:00"), tactic(wed, "2", "07:00"), rows[3]]
+    record = week_record(repo, cycle, 1)
+    assert (
+        save_actual(repo, cycle, 1, after, parse_plan_rows(cycle, 1, [run], [admin], as_planned, record.plan_by_id))
+        is False
+    )
+    assert repo.recorded_weeks(cycle.id) == set() and week_view(repo, cycle, 1, after).summary is None
+
+
+def test_record_links_are_checked(repo):
+    cycle, run, admin = planned_week_one(repo)
+    record = week_record(repo, cycle, 1)
+    mon = str(record.plan[0].id)
+    fri = str(next(i.id for i in record.plan if i.kind == "block"))
+    row = FormRow("tactic", str(run.id), day="0", time="07:00", minutes="30", plan=mon)
+    with pytest.raises(FormError, match="Reload the page"):
+        parse_plan_rows(cycle, 1, [run], [admin], [row, row], record.plan_by_id)  # the same session twice
+    with pytest.raises(FormError, match="Reload the page"):
+        parse_plan_rows(cycle, 1, [run], [admin], [replace(row, plan=fri)], record.plan_by_id)  # a block's
+    with pytest.raises(FormError, match="Reload the page"):
+        parse_plan_rows(cycle, 1, [run], [admin], [FormRow("event", title="Dinner", time="19:00")], record.plan_by_id)
+
+
+def test_an_unplanned_week_can_still_be_recorded(repo):
+    cycle, run, _mocks = setup(repo)
+    after = MON + timedelta(days=8)
+    form = actual_form(repo, cycle, 1, week_record(repo, cycle, 1))
+    assert [g.tactic.title for g in form.tactics] == ["Run"] and form.tactics[0].rows[0]["plan"] == ""
+    items = parse_plan_rows(
+        cycle, 1, [run], [], [FormRow("tactic", str(run.id), day="2", time="18:00", minutes="30")], {}
+    )
+    assert save_actual(repo, cycle, 1, after, items) is True
+    record = week_record(repo, cycle, 1)
+    assert record.recorded and not record.planned and record.changes == []
+    view = week_view(repo, cycle, 1, after)
+    assert [s.title for s in view.sessions] == ["Run"] and view.summary is None and view.ghosts == []

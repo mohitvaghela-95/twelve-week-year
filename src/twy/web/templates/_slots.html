@@ -39,31 +39,31 @@
 </fieldset>
 {%- endmacro %}
 
-{#- One tactic on the week planning page: its sessions this week. -#}
-{% macro tactic_group(group) -%}
+{#- One tactic on the week planning page (or, with record=True, the page recording what happened). -#}
+{% macro tactic_group(group, record=False) -%}
 {% set hidden = {"slot_kind": "tactic", "slot_ref": group.tactic.id, "slot_origin": "", "slot_title": ""} %}
 <fieldset class="slots plan-group" data-slots id="tactic-{{ group.tactic.id }}">
   <legend>{{ group.tactic.title }}</legend>
-  <p class="muted small">{{ group.goal_title }} · <span data-placed-for="{{ group.tactic.id }}">{{ group.placed }}</span> of {{ group.tactic.times_per_week }} placed</p>
+  <p class="muted small">{{ group.goal_title }} · <span data-placed-for="{{ group.tactic.id }}">{{ group.placed }}</span> of {{ group.tactic.times_per_week }} {{ "happened" if record else "placed" }}</p>
   {{ slot_head() }}
   <div data-slot-rows>
-    {%- for row in group.rows %}{{ slot_row(row, hidden) }}{% endfor -%}
+    {%- for row in group.rows %}{{ slot_row(row, dict(hidden, slot_plan=row.plan or ""), note=row.note) }}{% endfor -%}
   </div>
-  <template data-slot-template>{{ slot_row({"day": group.rows[-1].day if group.rows else "0", "time": "", "minutes": group.rows[-1].minutes if group.rows else "60"}, hidden) }}</template>
+  <template data-slot-template>{{ slot_row({"day": group.rows[-1].day if group.rows else "0", "time": "", "minutes": group.rows[-1].minutes if group.rows else "60"}, dict(hidden, slot_plan=""), note="Added: wasn't in the plan" if record else None) }}</template>
   <button type="button" class="btn small" data-add-slot data-js-only hidden>+ Add time</button>
 </fieldset>
 {%- endmacro %}
 
-{#- One block on the week planning page: its occurrences this week. A blank time skips one. -#}
-{% macro block_group(group) -%}
+{#- One block on the week planning page: its occurrences this week. A blank time skips one (or, recording, didn't happen). -#}
+{% macro block_group(group, record=False) -%}
 <fieldset class="slots plan-group" data-slots id="block-{{ group.block.id }}">
   <legend><span class="kind-dot kind-{{ group.block.kind }}"></span>{{ group.block.title }}</legend>
-  <p class="muted small">Change a time for this week only, or clear it to skip it.</p>
+  <p class="muted small">{{ "Clear a time if it didn't happen." if record else "Change a time for this week only, or clear it to skip it." }}</p>
   {{ slot_head() }}
   <div data-slot-rows>
     {%- for row in group.rows %}
-    {{ slot_row(row, {"slot_kind": "block", "slot_ref": group.block.id, "slot_origin": row.origin, "slot_title": ""},
-                note=("Skipped this week · usually " if not row.time else "Usually ") ~ row.usual, removable=False) }}
+    {{ slot_row(row, {"slot_kind": "block", "slot_ref": group.block.id, "slot_origin": row.origin, "slot_title": "", "slot_plan": row.plan or ""},
+                note=row.note if record else ("Skipped this week · usually " if not row.time else "Usually ") ~ row.usual, removable=False) }}
     {%- endfor -%}
   </div>
 </fieldset>
@@ -71,7 +71,7 @@
 
 {#- One-off events this week: anything else that's on. -#}
 {% macro event_group(rows) -%}
-{% set hidden = {"slot_kind": "event", "slot_ref": "", "slot_origin": ""} %}
+{% set hidden = {"slot_kind": "event", "slot_ref": "", "slot_origin": "", "slot_plan": ""} %}
 <fieldset class="slots plan-group" data-slots id="events">
   <legend><span class="kind-dot kind-event"></span>Events this week</legend>
   <p class="muted small">One-offs to plan around, like a dinner or a trip. They go in your calendar but aren't scored.</p>

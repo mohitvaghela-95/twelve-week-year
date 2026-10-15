@@ -560,6 +560,16 @@ body.onboarding { padding-bottom: 24px; }
 .timeline.has-allday .tl-hours { margin-top: 70px; } /* .tl-head 32px + .tl-allday 38px */
 .tl-allday .allday { margin: 0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Plan vs what happened: the plan's outline where a session was meant to be, and a tag on what changed. */
+.compare-summary { font-weight: 600; }
+.compare-summary .muted { display: block; font-weight: 400; }
+.badge { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; background: var(--warn-bg); color: var(--warn); vertical-align: 1px; }
+.session.ghost { background: transparent; border-left-style: dashed; opacity: 0.6; }
+.session.ghost strong { text-decoration: line-through; }
+.tl-item { z-index: 1; }
+.tl-item.tl-ghost { z-index: 0; background: transparent; border: 1.5px dashed var(--kind); opacity: 0.55; }
+.reset-actual { margin-top: 12px; }
+
 .kind-tactic { --kind: var(--accent); }
 .kind-admin { --kind: #868e96; }
 .kind-chores { --kind: #e67700; }

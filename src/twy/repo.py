@@ -462,6 +462,22 @@ class Repo:
         )
         return {r["week_no"] for r in rows}
 
+    def recorded_weeks(self, cycle_id: int) -> set[int]:
+        rows = self.conn.execute(
+            "SELECT week_no FROM week_status WHERE cycle_id = ? AND recorded_at IS NOT NULL", (cycle_id,)
+        )
+        return {r["week_no"] for r in rows}
+
+    def clear_actual(self, cycle_id: int, week_no: int) -> None:
+        """Forget what was recorded for a week, so it reads as having gone to plan."""
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM week_item WHERE cycle_id = ? AND week_no = ? AND layer = 'actual'", (cycle_id, week_no)
+            )
+            self.conn.execute(
+                "UPDATE week_status SET recorded_at = NULL WHERE cycle_id = ? AND week_no = ?", (cycle_id, week_no)
+            )
+
     def resync_block_rows(self, block: Block, weeks: list[int]) -> None:
         """After a block's weekly slots change, refresh its occurrences in the given (planned) weeks.
 
