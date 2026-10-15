@@ -96,4 +96,13 @@
   <p class="muted small">Everything lives in one SQLite file on the server:<br><code>{{ db_path }}</code></p>
   <a class="btn block" href="{{ url_for('web.backup') }}" download>Download backup</a>
 </section>
+<form method="post" action="{{ url_for('web.settings_reset') }}" class="card stack" id="reset"
+      data-confirm="Delete every cycle, your vision, prompts and settings? This can't be undone.">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <h2>Reset everything</h2>
+  <p class="muted small">Start fresh: deletes every cycle with all its goals, tactics, logs and reviews, your vision, your settings and calendar links, and puts the reflection prompts back to the defaults. Your calendar subscription link changes too. Download a backup first if you might want any of it back.</p>
+  <label for="confirm">Type <strong>{{ RESET_WORD }}</strong> to confirm</label>
+  <input id="confirm" name="confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+  <button class="btn warn block">Reset everything</button>
+</form>
 {% endblock %}

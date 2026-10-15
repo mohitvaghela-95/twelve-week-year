@@ -6,6 +6,15 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
+# The reflection prompts a new database starts with (v3 inserts them; a factory reset puts them back).
+DEFAULT_PROMPTS: list[tuple[str, str, str]] = [  # (scope, label, kind), in order within each scope
+    ("daily", "What went well?", "text"),
+    ("daily", "What got in the way?", "text"),
+    ("daily", "Top tactics for tomorrow", "text"),
+    ("weekly", "What got in the way?", "text"),
+    ("weekly", "One fix for next week", "text"),
+]
+
 MIGRATIONS: list[str] = [
     # v1: initial schema
     """

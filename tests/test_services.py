@@ -8,6 +8,8 @@ from twy.services import (
     create_cycle,
     cycle_status,
     default_review_week,
+    edit_cycle,
+    factory_reset,
     loggable,
     parse_alert_minutes,
     parse_answers,
@@ -265,3 +267,45 @@ def test_today_rows_and_progress(repo):
     rows = today_rows(repo, cycle, wed)
     assert [(r.title, r.today, r.week, r.planned) for r in rows] == [("Run", 1, 5, 3)]  # Launch starts in week 10
     assert week_progress(rows) == 1.0  # capped at the plan
+
+
+def test_edit_cycle_renames_and_moves_the_start_until_something_is_logged(repo):
+    cycle, _, _, run, _ = make_plan(repo)
+    with pytest.raises(FormError, match="Name"):
+        edit_cycle(repo, cycle, "  ", "")
+    cycle = edit_cycle(repo, cycle, " Autumn ", "2026-10-07")  # a Wednesday: snaps to the next Monday
+    assert (cycle.name, cycle.start_date) == ("Autumn", date(2026, 10, 12))
+    assert repo.get_cycle(cycle.id) == cycle
+
+    repo.log_tactic(run.id, date(2026, 10, 12), 1)
+    with pytest.raises(FormError, match="locked"):
+        edit_cycle(repo, cycle, "Autumn", "2026-10-19")
+    # Renaming still works, whether the locked date is posted unchanged or not at all (a disabled field).
+    assert edit_cycle(repo, cycle, "Fall", "2026-10-12").name == "Fall"
+    assert edit_cycle(repo, cycle, "Fall 2", "").start_date == date(2026, 10, 12)
+
+
+def test_edit_cycle_keeps_an_unchanged_start_after_the_week_start_setting_changes(repo):
+    cycle, *_ = make_plan(repo)  # starts on a Monday
+    repo.set_setting("week_start", "6")  # weeks now start on Sunday
+    edited = edit_cycle(repo, cycle, "Q4", MON.isoformat())
+    assert (edited.start_date, edited.week_start) == (MON, 0)
+    moved = edit_cycle(repo, cycle, "Q4", "2026-10-06")
+    assert (moved.start_date, moved.week_start) == (date(2026, 10, 11), 6)
+
+
+def test_closed_cycle_cant_be_edited(repo):
+    cycle, *_ = make_plan(repo)
+    repo.set_cycle_status(cycle.id, "closed")
+    with pytest.raises(FormError, match="closed"):
+        edit_cycle(repo, repo.get_cycle(cycle.id), "New name", "")
+
+
+def test_factory_reset_needs_the_word(repo):
+    make_plan(repo)
+    for text in ("", "reset", "RESET please"):
+        with pytest.raises(FormError, match="Nothing was deleted"):
+            factory_reset(repo, text)
+    assert repo.list_cycles()
+    factory_reset(repo, " RESET ")
+    assert repo.list_cycles() == []

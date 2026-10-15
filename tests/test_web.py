@@ -186,6 +186,9 @@ def test_closed_cycle_is_read_only(client, db_path):
     assert post(client, f"{base}/week13", {"action": "save"}).status_code == 403
     assert "read-only" in client.get(base).text
     assert client.get(f"{base}/review/1").status_code == 200
+    assert post(client, f"{base}/edit", {"name": "New", "start": "2026-06-08"}).status_code == 403
+    page = client.get(f"{base}/edit").text  # closed: the page only offers delete
+    assert "Delete cycle" in page and 'name="name"' not in page
 
 
 def test_backup_download_is_a_valid_database(client, tmp_path):
@@ -216,6 +219,7 @@ def test_every_page_renders(client, db_path):
         "/c/1/week13",
         "/c/1/week/1",
         "/c/1/blocks/new",
+        "/c/1/edit",
         "/cycles",
         "/vision",
         "/settings",
@@ -819,3 +823,53 @@ def test_review_catch_up_and_plan_reorder(client, db_path):
 
     # A new cycle can't be started while this one runs, so Cycles doesn't offer it.
     assert "+ New" not in client.get("/cycles").text
+
+
+def test_edit_and_delete_cycles(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "0", "long_term": "", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
+    repo = repo_for(db_path)
+    old = repo.create_cycle("Old", date(2026, 6, 1), 0)
+    repo.set_cycle_status(old.id, "closed")
+    assert "/c/1/edit" in client.get("/c/1").text and f"/c/{old.id}/edit" in client.get("/cycles").text
+
+    response = post(client, "/c/1/edit", {"name": "", "start": "2026-10-05"})
+    assert response.status_code == 422 and "Name is required." in response.text
+    response = post(client, "/c/1/edit", {"name": "Autumn", "start": "2026-10-08"})
+    assert response.location == "/c/1"
+    assert (repo.get_cycle(1).name, repo.get_cycle(1).start_date) == ("Autumn", date(2026, 10, 12))
+
+    goal = repo.save_goal(Goal(id=None, cycle_id=1, title="Fit"))
+    tactic = repo.save_tactic(Tactic(id=None, goal_id=goal.id, title="Run"))
+    repo.log_tactic(tactic.id, date(2026, 10, 12), 1)
+    page = client.get("/c/1/edit").text
+    assert "Locked:" in page and 'name="start"' not in page
+    assert post(client, "/c/1/edit", {"name": "Fall"}).location == "/c/1"  # the disabled date isn't posted
+    assert repo.get_cycle(1).start_date == date(2026, 10, 12)
+
+    response = post(client, f"/c/{old.id}/delete")  # closed cycles can still be deleted
+    assert response.location == "/cycles"
+    assert "Deleted “Old”." in client.get("/cycles").text
+    assert "+ New" not in client.get("/cycles").text  # Fall is still open
+    assert post(client, "/c/1/delete").location == "/"  # the last one: home offers a new cycle
+    assert "+ New" in client.get("/cycles").text
+    assert repo.list_cycles() == [] and client.get("/c/1/edit").status_code == 404
+
+
+def test_reset_everything(client, db_path):
+    login(client)
+    post(client, "/setup", {"week_start": "6", "long_term": "Free", "three_year": ""})
+    post(client, "/cycles/new", {"name": "Q4", "start": "2026-10-05"})
+    assert 'id="reset"' in client.get("/settings").text
+
+    response = post(client, "/settings/reset", {"confirm": "reset"})
+    assert response.location == "/settings#reset"
+    assert "Type RESET to confirm" in client.get("/settings").text
+    assert repo_for(db_path).list_cycles()
+
+    assert post(client, "/settings/reset", {"confirm": "RESET"}).location == "/setup"
+    repo = repo_for(db_path)
+    assert repo.list_cycles() == [] and not repo.is_configured and repo.get_vision("long_term") == ""
+    assert len(repo.list_prompts("daily")) == 3
+    assert client.get("/").location == "/setup"  # still logged in: back to onboarding

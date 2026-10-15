@@ -511,8 +511,13 @@ body.onboarding { padding-bottom: 24px; }
 .w13-input input { width: 110px; }
 .w13-goal select { width: auto; min-width: 170px; }
 
-.cycle-card { color: var(--text); }
-.cycle-card:hover { text-decoration: none; border-color: var(--accent); }
+/* The name link covers the whole card; the Edit link sits above that cover. */
+.cycle-card { position: relative; color: var(--text); }
+.cycle-card:hover { border-color: var(--accent); }
+.cycle-card .card-cover { color: inherit; }
+.cycle-card .card-cover:hover { text-decoration: none; }
+.cycle-card .card-cover::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.cycle-card .card-action { position: relative; z-index: 1; font-weight: 500; }
 
 .menu { padding: 0; overflow: hidden; }
 .menu a { display: flex; justify-content: space-between; padding: 16px; color: var(--text); border-top: 1px solid var(--border); font-weight: 500; }
