@@ -59,7 +59,8 @@
     <div class="tactic">
       <span class="muted small">{{ t.goal_title }}</span>
       <span>{{ t.title }}<span class="done-mark" title="Done {{ 'today' if day == today else 'this day' }}"> ✓</span></span>
-      <span class="muted small week-count"><span data-week>{{ t.week }}</span> / {{ t.planned }} this week<span class="met-mark"> · target met</span></span>
+      <span class="muted small week-count"><span data-week>{{ t.week }}</span> / {{ t.planned }} this week<span class="met-mark"> · target met</span>
+        {%- if planned_today is not none and planned_today.get(t.tactic_id) %} · {{ planned_today[t.tactic_id] }} planned {{ "today" if day == today else "this day" }}{% endif %}</span>
     </div>
     <div class="stepper">
       {% if not read_only %}{{ log_button(t, -1) }}{% endif %}
@@ -73,10 +74,11 @@
 </section>
 
 <div>
-{% if sessions or all_day %}
+{% if sessions or all_day or anytime %}
 <section class="card">
   <div class="card-head"><h2>Scheduled</h2><a href="{{ url_for('web.week', cycle_id=cycle.id, week_no=week_no) }}">Week ›</a></div>
   {% for title in all_day %}<p class="allday small">{{ title }}</p>{% endfor %}
+  {% if anytime %}<p class="anytime small">Anytime {{ "today" if day == today else "this day" }}: {% for a in anytime %}<a class="anytime-chip" href="#t-{{ a.tactic_id }}">{{ a.label }}</a>{% endfor %}</p>{% endif %}
   {% for s in sessions %}
   <{{ "a" if s.owner == "tactic" else "div" }} class="session kind-{{ s.kind }}"{% if s.owner == "tactic" %} href="#t-{{ s.owner_id }}"{% endif %}>
     <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>

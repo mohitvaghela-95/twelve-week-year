@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
-from twy.domain.schedule import Session
+from twy.domain.schedule import Anytime, Session
 from twy.web.ics import fold, render_calendar
 
 LONDON = ZoneInfo("Europe/London")
@@ -67,3 +67,13 @@ def test_categories_name_tactics_events_and_blocks():
         "CATEGORIES:Weekly review",
     ]
     assert "DESCRIPTION:Planned around in week 1" in text and "UID:event-c1-w1-1@twy" in text
+
+
+def test_sessions_with_no_set_time_are_one_all_day_event_per_tactic_per_day():
+    water = Anytime(date(2026, 10, 7), 2, "Drink water", 5, 1, 1, context="Health")
+    once = Anytime(date(2026, 10, 8), 3, "Stretch", 1, 1, 1)
+    text = render_calendar([], 10, NOW, LONDON, anytime=[water, once])
+    assert text.count("BEGIN:VEVENT") == 2 and "VALARM" not in text  # no alarm for an all-day note
+    assert "UID:tactic-2-w1-d20261007@twy" in text and "SUMMARY:Drink water ×5" in text
+    assert "DTSTART;VALUE=DATE:20261007\r\nDTEND;VALUE=DATE:20261008" in text
+    assert "TRANSP:TRANSPARENT" in text and "SUMMARY:Stretch\r\n" in text

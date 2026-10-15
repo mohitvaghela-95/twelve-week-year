@@ -11,17 +11,24 @@ twy.calendars) show alongside, and count when checking for clashes. No Flask imp
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, timedelta
 from itertools import zip_longest
 
 from twy.calendars import all_day_dates, busy, day_spans
 from twy.domain.compare import Change, comparable, compare, log_hints, summary, when
 from twy.domain.conflicts import Placed, placed_for_week
 from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, current_week, week_range
-from twy.domain.schedule import Session, planning_offset, sessions_from_items, template_items
+from twy.domain.schedule import (
+    Anytime,
+    Session,
+    anytime_from_items,
+    planning_offset,
+    sessions_from_items,
+    template_items,
+)
 from twy.models import WEEKDAY_SHORT, Block, Cycle, Slot, Tactic, WeekItem, hhmm
 from twy.repo import Repo
-from twy.services import FormError, clash_hints, form_slots, parse_slot_row
+from twy.services import FormError, clash_hints, form_slots, parse_slot_row, week_of
 
 # Without a weekly review block, next week's "not planned yet" reminder starts on the week's 6th day.
 DEFAULT_PLANNING_OFFSET = 5
@@ -61,12 +68,37 @@ def resolved_items(repo: Repo, cycle: Cycle, week_no: int) -> list[WeekItem]:
     return template_items(cycle, week_no, repo.list_blocks(cycle.id))
 
 
-def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
-    """Every session in one cycle week, in time order."""
+def tactic_contexts(repo: Repo, cycle: Cycle) -> dict[int, str]:
+    """Tactic id → its goal's title."""
     goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
-    contexts = {t.id: goals.get(t.goal_id, "") for t in repo.list_tactics(cycle.id)}
+    return {t.id: goals.get(t.goal_id, "") for t in repo.list_tactics(cycle.id) if t.id is not None}
+
+
+def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
+    """Every timed session in one cycle week, in time order."""
     kinds = {b.id: b.kind for b in repo.list_blocks(cycle.id)}
-    return sessions_from_items(cycle, week_no, resolved_items(repo, cycle, week_no), contexts, kinds)
+    return sessions_from_items(
+        cycle, week_no, resolved_items(repo, cycle, week_no), tactic_contexts(repo, cycle), kinds
+    )
+
+
+def week_anytime(repo: Repo, cycle: Cycle, week_no: int) -> list[Anytime]:
+    """The tactic sessions planned for a day of the week but not a time."""
+    return anytime_from_items(cycle, week_no, resolved_items(repo, cycle, week_no), tactic_contexts(repo, cycle))
+
+
+def planned_on(repo: Repo, cycle: Cycle, day: date) -> dict[int, int] | None:
+    """Tactic id → how many sessions the week's plan puts on `day`, or None if the week isn't planned."""
+    week_no = week_of(cycle, day)
+    if week_no not in repo.planned_weeks(cycle.id):
+        return None
+    return dict(
+        Counter(
+            i.tactic_id
+            for i in repo.week_items(cycle.id, week_no)
+            if i.kind == "tactic" and i.tactic_id is not None and i.weekday == day.weekday()
+        )
+    )
 
 
 @dataclass
@@ -131,7 +163,8 @@ def shortfall(tactics: list[Tactic], items: list[WeekItem]) -> list[tuple[Tactic
 
 # One row per session, as parallel lists: kind (tactic | block | event), ref (tactic or block id),
 # origin ("weekday:start" of a block's weekly slot), title (events), day, time and minutes, and
-# when recording what happened, plan (the id of the planned session the row records).
+# when recording what happened, plan (the id of the planned session the row records). On the
+# tactic grid each session is a hidden row inside its day's cell; a blank time is "no set time".
 FORM_FIELDS = (
     "slot_kind",
     "slot_ref",
@@ -181,16 +214,37 @@ def usual_label(origin: tuple[int, int]) -> str:
 
 
 @dataclass
+class DayCell:
+    """One tactic on one day of the week grid: its sessions there, each with an optional time."""
+
+    day: date
+    sessions: list[dict] = field(default_factory=list)  # {"time", "minutes", "plan"} as strings
+    planned: list[dict] = field(default_factory=list)  # recording: the plan's sessions this day, with "id"
+
+    @property
+    def weekday(self) -> int:
+        return self.day.weekday()
+
+    @property
+    def count(self) -> int:
+        return len(self.sessions)
+
+
+@dataclass
 class TacticGroup:
-    """One tactic on the planning page: its rows in the slot editor."""
+    """One tactic on the week grid: a cell for each day of the cycle week, in week order."""
 
     tactic: Tactic
     goal_title: str
-    rows: list[dict] = field(default_factory=list)  # {"day", "time", "minutes"} as strings
+    days: list[DayCell] = field(default_factory=list)
 
     @property
     def placed(self) -> int:
-        return sum(1 for r in self.rows if r["time"].strip())
+        return sum(c.count for c in self.days)
+
+    @property
+    def over(self) -> int:
+        return max(self.placed - self.tactic.times_per_week, 0)
 
 
 @dataclass
@@ -208,20 +262,44 @@ class PlanForm:
     events: list[dict]  # {"title", "day", "time", "minutes"}
 
 
+def week_days(cycle: Cycle, week_no: int) -> list[date]:
+    """The seven dates of a cycle week, in order."""
+    first, _last = week_range(cycle.start_date, week_no)
+    return [first + timedelta(days=n) for n in range(7)]
+
+
+def session_view(item: WeekItem, plan: str = "") -> dict:
+    """A tactic session as the grid shows it: a blank time means no set time."""
+    if item.start_min is None:
+        return {"time": "", "minutes": "", "plan": plan}
+    return {"time": hhmm(item.start_min), "minutes": str(item.duration_min), "plan": plan}
+
+
+def by_time(item: WeekItem) -> tuple[int, int]:
+    """Timed sessions first, in time order, then the ones with no set time."""
+    return (0, item.start_min) if item.start_min is not None else (1, 0)
+
+
+def build_cells(
+    cycle: Cycle, week_no: int, sessions: list[tuple[int, dict]], planned: list[tuple[int, dict]] = ()
+) -> list[DayCell]:
+    """A grid row's seven cells from (weekday, session view) pairs, in the order given."""
+    cells = {d.weekday(): DayCell(d) for d in week_days(cycle, week_no)}
+    for weekday, view in sessions:
+        cells[weekday].sessions.append(view)
+    for weekday, view in planned:
+        cells[weekday].planned.append(view)
+    return list(cells.values())
+
+
 def tactic_groups(repo: Repo, cycle: Cycle, week_no: int, items: list[WeekItem]) -> list[TacticGroup]:
-    """Each active tactic with its placed times, plus blank rows up to its times per week."""
+    """Each active tactic with its sessions, day by day."""
     goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
     groups = []
     for t in active_tactics(repo, cycle, week_no):
-        mine = [i for i in items if i.kind == "tactic" and i.tactic_id == t.id]
-        rows = [{"day": str(i.weekday), "time": hhmm(i.start_min), "minutes": str(i.duration_min)} for i in mine]
-        day = (mine[-1].weekday + 1) if mine else cycle.start_date.weekday()
-        minutes = rows[-1]["minutes"] if rows else "60"
-        rows += [
-            {"day": str((day + n) % 7), "time": "", "minutes": minutes}
-            for n in range(max(t.times_per_week - len(mine), 0))
-        ]
-        groups.append(TacticGroup(t, goals.get(t.goal_id, ""), rows))
+        mine = sorted((i for i in items if i.kind == "tactic" and i.tactic_id == t.id), key=by_time)
+        cells = build_cells(cycle, week_no, [(i.weekday, session_view(i)) for i in mine])
+        groups.append(TacticGroup(t, goals.get(t.goal_id, ""), cells))
     return groups
 
 
@@ -264,25 +342,31 @@ def posted_form(
     plan_items: Mapping[int, WeekItem] | None = None,
 ) -> PlanForm:
     """The planning (or, with `plan_items`, recording) form as it was posted, to show it again with an error."""
-    tactics = {t.id: TacticGroup(t, "") for t in repo.list_tactics(cycle.id)}
     goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
-    for group in tactics.values():
-        group.goal_title = goals.get(group.tactic.goal_id, "")
+    tactic_list = repo.list_tactics(cycle.id)
+    posted: dict[int, list[tuple[int, dict]]] = {t.id: [] for t in tactic_list}
     blocks = {b.id: BlockGroup(b) for b in repo.list_blocks(cycle.id)}
     events = []
     for row in rows:
         ref = int(row.ref) if row.ref.isdigit() else None
         view = row.view
+        if row.kind == "tactic" and ref in posted and row.day.isdigit() and int(row.day) <= 6:
+            minutes = row.minutes if row.time.strip() else ""
+            posted[ref].append((int(row.day), {"time": row.time, "minutes": minutes, "plan": row.plan}))
+            continue
         if plan_items is not None:
             planned = plan_items.get(int(row.plan)) if row.plan.isdigit() else None
             view |= {"plan": row.plan, "note": record_note(planned, row.time)}
-        if row.kind == "tactic" and ref in tactics:
-            tactics[ref].rows.append(view)
-        elif row.kind == "block" and ref in blocks and (origin := parse_origin(row.origin)):
+        if row.kind == "block" and ref in blocks and (origin := parse_origin(row.origin)):
             blocks[ref].rows.append(view | {"origin": row.origin, "usual": usual_label(origin)})
         elif row.kind == "event":
             events.append(view)
-    shown = [g for g in tactics.values() if g.rows or g.tactic.active_in(week_no) and week_no <= EXECUTION_WEEKS]
+    shown = []
+    for t in tactic_list:
+        if not (posted[t.id] or t.active_in(week_no) and week_no <= EXECUTION_WEEKS):
+            continue
+        planned_cells = planned_views(plan_items.values(), t.id) if plan_items is not None else []
+        shown.append(TacticGroup(t, goals.get(t.goal_id, ""), build_cells(cycle, week_no, posted[t.id], planned_cells)))
     if plan_items is not None:
         return PlanForm(shown, [b for b in blocks.values() if b.rows], [])
     return PlanForm(shown, [b for b in blocks.values() if b.rows], events or [blank_event(cycle)])
@@ -298,10 +382,12 @@ def parse_plan_rows(
 ) -> list[WeekItem]:
     """A week's items from the planning form, or with `plan_items`, from recording what happened.
 
-    Tactic and event rows without a time are left out. When planning, a block row without a time
-    is that occurrence skipped this week, and one at another time or length is moved. When
-    recording, rows are the "actual" layer: a blank time means it didn't happen, and each row
-    may name the planned session (by id, from `plan_items`) it records.
+    Every tactic row is a session on its day; without a time it has no set time. Event rows
+    without a time are left out. When planning, a block row without a time is that occurrence
+    skipped this week, and one at another time or length is moved. When recording, rows are the
+    "actual" layer: a tactic session that didn't happen is simply not posted, a block row with a
+    blank time didn't happen, and each row may name the planned session (by id, from
+    `plan_items`) it records.
     """
     recording = plan_items is not None
     layer = "actual" if recording else "plan"
@@ -334,22 +420,27 @@ def parse_plan_rows(
             tactic = tactic_by_id.get(ref)
             if tactic is None:
                 raise FormError(STALE)
-            nth[tactic.id] += 1
+            if not (row.day.isdigit() and 0 <= int(row.day) <= 6):
+                raise FormError(STALE)
+            nth[(tactic.id, row.day)] += 1
             plan_item_id = link(row, "tactic", tactic.id) if recording else None
             if row.time.strip():
-                slot = slot_for(row, f"{tactic.title}, time {nth[tactic.id]}")
-                items.append(
-                    WeekItem(
-                        cycle.id,
-                        week_no,
-                        "tactic",
-                        *slot_fields(slot),
-                        layer=layer,
-                        tactic_id=tactic.id,
-                        title=tactic.title,
-                        plan_item_id=plan_item_id,
-                    )
+                label = f"{tactic.title}, {WEEKDAY_SHORT[int(row.day)]} session {nth[(tactic.id, row.day)]}"
+                when_ = slot_fields(slot_for(row, label))
+            else:
+                when_ = (int(row.day), None, None)
+            items.append(
+                WeekItem(
+                    cycle.id,
+                    week_no,
+                    "tactic",
+                    *when_,
+                    layer=layer,
+                    tactic_id=tactic.id,
+                    title=tactic.title,
+                    plan_item_id=plan_item_id,
                 )
+            )
         elif row.kind == "block":
             block, origin = block_by_id.get(ref), parse_origin(row.origin)
             if block is None or origin is None:
@@ -455,7 +546,7 @@ def week_plan_check(repo: Repo, cycle: Cycle, week_no: int, rows: list[FormRow])
         week_no,
         [i for i in resolved_items(repo, cycle, week_no) if i.kind == "block" and i.block_id not in posted],
     ) + import_placed(imports_for_week(repo, cycle, week_no), week_no)
-    placed = Counter(p.owner_id for p in placed_rows if p is not None and p.owner == "tactic")
+    placed = Counter(int(r.ref) for r in rows if r.kind == "tactic" and r.ref.isdigit())
     return {
         "rows": clash_hints(placed_rows, others, repo.day_window),
         "placed": {str(t): placed[t] for t in tactics},
@@ -518,7 +609,7 @@ def actual_form(repo: Repo, cycle: Cycle, week_no: int, record: WeekRecord) -> P
         happened = template_items(cycle, week_no, repo.list_blocks(cycle.id))
     plan_by_id = record.plan_by_id
     done = {i.plan_item_id for i in happened}
-    missed = [p for p in plan_by_id.values() if p.id not in done]
+    missed = [p for p in plan_by_id.values() if p.id not in done and p.kind == "block"]
 
     def row(item: WeekItem, planned: WeekItem | None, happened_: bool) -> dict:
         time = hhmm(item.start_min) if happened_ else ""
@@ -538,22 +629,31 @@ def actual_form(repo: Repo, cycle: Cycle, week_no: int, record: WeekRecord) -> P
             out |= {"origin": f"{origin[0]}:{origin[1]}", "usual": usual_label(origin)}
         return out
 
-    entries = [(i, plan_by_id.get(i.plan_item_id), True) for i in happened] + [(p, p, False) for p in missed]
+    happened_blocks = [i for i in happened if i.kind == "block"]
+    entries = [(i, plan_by_id.get(i.plan_item_id), True) for i in happened_blocks] + [(p, p, False) for p in missed]
     entries.sort(key=lambda e: ((e[1] or e[0]).weekday, (e[1] or e[0]).start_min))
 
     goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
     tactics = []
     for t in repo.list_tactics(cycle.id):
-        rows = [row(i, p, ok) for i, p, ok in entries if i.kind == "tactic" and i.tactic_id == t.id]
-        if rows or (week_no <= EXECUTION_WEEKS and t.active_in(week_no)):
-            blank = {"day": str(cycle.start_date.weekday()), "time": "", "minutes": "60", "plan": "", "note": ""}
-            tactics.append(TacticGroup(t, goals.get(t.goal_id, ""), rows or [blank]))
+        mine = sorted((i for i in happened if i.kind == "tactic" and i.tactic_id == t.id), key=by_time)
+        planned_cells = planned_views(plan_by_id.values(), t.id)
+        if mine or planned_cells or (week_no <= EXECUTION_WEEKS and t.active_in(week_no)):
+            sessions = [(i.weekday, session_view(i, str(i.plan_item_id or ""))) for i in mine]
+            cells = build_cells(cycle, week_no, sessions, planned_cells)
+            tactics.append(TacticGroup(t, goals.get(t.goal_id, ""), cells))
     blocks = []
     for b in repo.list_blocks(cycle.id):
         rows = [row(i, p, ok) for i, p, ok in entries if i.kind == "block" and i.block_id == b.id]
         if rows:
             blocks.append(BlockGroup(b, rows))
     return PlanForm(tactics, blocks, [])
+
+
+def planned_views(plan_items, tactic_id: int | None) -> list[tuple[int, dict]]:
+    """A tactic's planned sessions as (weekday, view with "id") pairs, for the recording grid."""
+    mine = sorted((p for p in plan_items if p.kind == "tactic" and p.tactic_id == tactic_id), key=by_time)
+    return [(p.weekday, session_view(p) | {"id": str(p.id)}) for p in mine]
 
 
 def save_actual(repo: Repo, cycle: Cycle, week_no: int, today: date, items: list[WeekItem]) -> bool:
@@ -571,9 +671,10 @@ def save_actual(repo: Repo, cycle: Cycle, week_no: int, today: date, items: list
 def rows_of(form: PlanForm) -> list[FormRow]:
     """The rows a rendered form posts, in page order: tactics, blocks, then events."""
     rows = [
-        FormRow("tactic", str(g.tactic.id), "", "", r["day"], r["time"], r["minutes"], r.get("plan", ""))
+        FormRow("tactic", str(g.tactic.id), "", "", str(c.weekday), r["time"], r["minutes"], r.get("plan", ""))
         for g in form.tactics
-        for r in g.rows
+        for c in g.days
+        for r in c.sessions
     ]
     rows += [
         FormRow("block", str(g.block.id), r["origin"], "", r["day"], r["time"], r["minutes"], r.get("plan", ""))
@@ -588,7 +689,7 @@ def _item_key(items: list[WeekItem]) -> list[tuple]:
         return -1 if value is None else value
 
     return sorted(
-        (i.kind, n(i.tactic_id), n(i.block_id), n(i.plan_item_id), i.weekday, i.start_min, i.duration_min)
+        (i.kind, n(i.tactic_id), n(i.block_id), n(i.plan_item_id), i.weekday, n(i.start_min), n(i.duration_min))
         for i in items
     )
 
@@ -651,32 +752,51 @@ class WeekView:
     summary: str | None = None
     planned: bool = False
     recorded: bool = False
+    anytime: list[Anytime] = field(default_factory=list)  # tactic sessions with a day but no set time
 
 
 def week_view(repo: Repo, cycle: Cycle, week_no: int, today: date) -> WeekView:
     planned = week_no in repo.planned_weeks(cycle.id)
-    if not week_ended(cycle, week_no, today):
-        return WeekView(week_sessions(repo, cycle, week_no), planned=planned)
-    record = week_record(repo, cycle, week_no)
-    if record.actual is None:
-        return WeekView(week_sessions(repo, cycle, week_no), planned=planned)
-    goals = {g.id: g.title for g in repo.list_goals(cycle.id)}
-    contexts = {t.id: goals.get(t.goal_id, "") for t in repo.list_tactics(cycle.id)}
+    record = week_record(repo, cycle, week_no) if week_ended(cycle, week_no, today) else None
+    if record is None or record.actual is None:
+        return WeekView(
+            week_sessions(repo, cycle, week_no), planned=planned, anytime=week_anytime(repo, cycle, week_no)
+        )
+    contexts = tactic_contexts(repo, cycle)
     kinds = {b.id: b.kind for b in repo.list_blocks(cycle.id)}
     events = [i for i in record.plan if i.kind == "event"]
     sessions = sessions_from_items(cycle, week_no, record.actual + events, contexts, kinds)
     view = WeekView(sessions, planned=planned, recorded=True)
+    view.anytime = recorded_anytime(cycle, week_no, record, contexts)
     if not planned:
         return view
     by_item = {s.item_id: s for s in sessions}
     for change in record.changes:
         if change.status in ("moved", "added") and change.actual.id in by_item:
             view.badges[by_item[change.actual.id].uid] = change.label
-        if change.status in ("moved", "dropped"):
+        if change.status in ("moved", "dropped") and change.plan.timed:
             [ghost] = sessions_from_items(cycle, week_no, [change.plan], contexts, kinds)
             view.ghosts.append((ghost, change.ghost_label))
     view.summary = summary(record.changes)
     return view
+
+
+def recorded_anytime(cycle: Cycle, week_no: int, record: WeekRecord, contexts: Mapping[int, str]) -> list[Anytime]:
+    """What happened with no set time, each day noting how many of the tactic's sessions happened
+    there against how many were planned, when those differ (a day planned but missed shows too)."""
+    actual, plan = record.actual or [], comparable(record.plan)
+    done = Counter((i.tactic_id, i.weekday) for i in actual if i.kind == "tactic")
+    meant = Counter((i.tactic_id, i.weekday) for i in plan if i.kind == "tactic")
+    untimed = {(a.tactic_id, a.day.weekday()): a for a in anytime_from_items(cycle, week_no, actual, contexts)}
+    missed = {(a.tactic_id, a.day.weekday()): a for a in anytime_from_items(cycle, week_no, plan, contexts)}
+    found = []
+    for key in untimed.keys() | missed.keys():
+        if key not in untimed and done[key]:
+            continue  # planned with no time, and it happened at a time: the timeline shows it
+        base = untimed.get(key) or replace(missed[key], count=0)
+        differs = done[key] != meant[key]
+        found.append(replace(base, happened=done[key] if differs else None, planned=meant[key] if differs else None))
+    return sorted(found, key=lambda a: (a.day, a.title))
 
 
 # -- keeping open plans in step with the 12-week plan -----------------------------

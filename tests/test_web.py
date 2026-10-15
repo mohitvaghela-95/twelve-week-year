@@ -300,9 +300,10 @@ def test_plan_a_week_then_week_page_and_calendar_feed(client, db_path):
     calendar_app = client.application.test_client()
     assert calendar_app.get(f"/calendar/{token}.ics").text.count("BEGIN:VEVENT") == 2
 
-    # The planning page lists each tactic to place, beside what's already on.
+    # The planning page is a grid: a row per tactic to place, a cell per day, beside what's already on.
     page = client.get(f"{base}/week/1/plan").text
-    assert "Study" in page and "0</span> of 5 placed" in page and "Admin" in page
+    assert "Study" in page and "<span data-placed>0</span> / 5" in page and "Admin" in page
+    assert page.count("data-cell ") == 7 and 'data-fill="all"' in page
     assert "Copy week" not in page  # week 1 has no week before it
     assert client.get(f"{base}/week/3/plan").status_code == 404  # only this week and next
     assert client.get(f"{base}/week/2/plan").status_code == 200
@@ -310,18 +311,24 @@ def test_plan_a_week_then_week_page_and_calendar_feed(client, db_path):
     rows = {"slot_kind": ["tactic"] * 3, "slot_ref": [str(study.id)] * 3, "slot_minutes": ["60"] * 3}
     bad = {**rows, "slot_day": ["0", "2", "4"], "slot_time": ["07:00", "7am", ""]}
     response = post(client, f"{base}/week/1/plan", bad)
-    assert response.status_code == 422 and "Study, time 2: use a time like 07:30." in response.text
+    assert response.status_code == 422 and "Study, Wed session 1: use a time like 07:30." in response.text
     assert 'value="7am"' in response.text and repo.planned_weeks(cycle.id) == set()
     stale = {**bad, "slot_ref": ["999"] * 3}
     assert "Reload the page" in post(client, f"{base}/week/1/plan", stale).text
 
+    # Friday's session has no set time: it's placed on Friday, any time.
     good = {**rows, "slot_day": ["0", "2", "4"], "slot_time": ["07:00", "07:00", ""]}
     response = post(client, f"{base}/week/1/plan", good)
     assert response.location == f"{base}/week/1"
     page = client.get(f"{base}/week/1").text
-    assert "Week 1 planned. Not all placed: Study 2 of 5." in page
-    assert "Not placed this week:" in page and "Study (2 of 5)" in page
-    assert "4 sessions" in page and "overlaps Admin" in page and "overlaps Study" in page
+    assert "Week 1 planned. Not all placed: Study 3 of 5." in page
+    assert "Not placed this week:" in page and "Study (3 of 5)" in page
+    assert "5 sessions" in page and "overlaps Admin" in page and "overlaps Study" in page
+    assert "Anytime:" in page and 'class="tl-anytime"' in page
+    page = client.get(f"{base}/day/2026-10-14").text  # Today: Wednesday's run is planned
+    assert "1 planned today" in page
+    page = client.get(f"{base}/week/1/plan").text
+    assert "<span data-placed>3</span> / 5" in page and "Anytime: Study" in page
     assert "Week 1 isn&#39;t planned yet" not in client.get(base).text
     assert client.get(f"{base}/week/14").status_code == 404
 
@@ -330,16 +337,22 @@ def test_plan_a_week_then_week_page_and_calendar_feed(client, db_path):
     assert calendar_app.get("/calendar/wrong.ics").status_code == 404
     feed = calendar_app.get(f"/calendar/{token}.ics")
     assert feed.status_code == 200 and feed.mimetype == "text/calendar"
-    assert feed.text.count("BEGIN:VEVENT") == 4
+    assert feed.text.count("BEGIN:VEVENT") == 5
     assert "SUMMARY:Study" in feed.text and "TRIGGER:-PT10M" in feed.text
     assert f"UID:tactic-{study.id}-w1-1@twy" in feed.text
+    # The Friday session with no time: an all-day event, with no alarm.
+    friday = feed.text.split(f"UID:tactic-{study.id}-w1-d20261016@twy")[1].split("END:VEVENT")[0]
+    assert "DTSTART;VALUE=DATE:20261016" in friday and "DTEND;VALUE=DATE:20261017" in friday
+    assert "TRANSP:TRANSPARENT" in friday and "VALARM" not in friday
 
     # ...until next week is planned. Copying last week fills in its times without saving anything.
     page = client.get(f"{base}/week/2/plan?copy=prev").text
-    assert "Week 1's times are filled in" in page and page.count('value="07:00"') == 2
+    assert "Week 1's sessions are filled in" in page and page.count('value="07:00"') == 2
+    assert "<span data-placed>3</span> / 5" in page
     assert repo.planned_weeks(cycle.id) == {1}
-    post(client, f"{base}/week/2/plan", {**good, "slot_time": ["06:30", "", ""]})
-    assert calendar_app.get(f"/calendar/{token}.ics").text.count("BEGIN:VEVENT") == 4 + 3
+    post(client, f"{base}/week/2/plan", {**good, "slot_day": ["0", "4", "4"], "slot_time": ["06:30", "", ""]})
+    feed = calendar_app.get(f"/calendar/{token}.ics").text
+    assert feed.count("BEGIN:VEVENT") == 5 + 4 and "SUMMARY:Study ×2" in feed
 
     post(client, "/settings/calendar/reset")
     assert calendar_app.get(f"/calendar/{token}.ics").status_code == 404
@@ -374,13 +387,13 @@ def test_clash_hints_and_plan_warnings(client, db_path):
         assert response.status_code == 200
         return response.get_json()
 
-    # A session at 07:30 clashes with Gym; the blank row and a clear row get nothing.
+    # A session at 07:30 clashes with Gym; one with no set time and a clear one get nothing.
     data = check(["07:30", "", "18:00"])
     rows = data["rows"]
     assert rows[1] is None and rows[2] is None
     assert rows[0]["clashes"] == ["Overlaps Gym · Mon 07:00–08:00"]
     assert (rows[0]["earlier"], rows[0]["later"]) == ("06:00", "08:00")
-    assert data["placed"] == {str(study.id): 2}
+    assert data["placed"] == {str(study.id): 3}  # a session with no set time is still placed
     # Two sessions of the plan clash with each other too.
     assert check(["18:00", "18:30"])["rows"][1]["clashes"] == ["Overlaps Study · Mon 18:00–19:00"]
     assert check(["07:30"], refs=["999"])["rows"] == [None]  # not a tactic of this week
@@ -566,18 +579,20 @@ def test_record_what_happened_and_compare_on_the_week_page(client, db_path):
     page = client.get(f"{base}/week/1").text
     assert "Not recorded, so taken as planned." in page and f'href="{base}/week/1/actual"' in page
     assert client.get(f"{base}/week/2/actual").status_code == 404  # still on
-    page = client.get(f"{base}/week/1/actual").text
-    assert "Planned Mon 07:00" in page and "Planned Wed 07:00" in page and "1 of 2" not in page
+    page = client.get(f"{base}/week/1/actual").text  # the grid, prefilled from the plan
+    assert "data-week-grid data-record" in page and f'"id": "{mon}"' in page and f'"id": "{wed}"' in page
+    assert f'name="slot_plan" value="{wed}"' in page and "plan 1" not in page
 
+    # Monday's run moved to Tuesday, Wednesday's didn't happen (so it isn't posted), and one extra.
     rows = {
-        "slot_kind": ["tactic"] * 3,
-        "slot_ref": [str(run.id)] * 3,
-        "slot_plan": [str(mon), str(wed), ""],
-        "slot_day": ["1", "2", "5"],
-        "slot_time": ["07:00", "", "09:00"],
-        "slot_minutes": ["30"] * 3,
+        "slot_kind": ["tactic"] * 2,
+        "slot_ref": [str(run.id)] * 2,
+        "slot_plan": [str(mon), ""],
+        "slot_day": ["1", "5"],
+        "slot_time": ["07:00", "09:00"],
+        "slot_minutes": ["30"] * 2,
     }
-    stale = {**rows, "slot_plan": [str(mon), str(mon), ""]}
+    stale = {**rows, "slot_plan": [str(mon), str(mon)]}
     response = post(client, f"{base}/week/1/actual", stale)
     assert response.status_code == 422 and "Reload the page" in response.text
     response = post(client, f"{base}/week/1/actual", rows)
@@ -620,7 +635,7 @@ def test_review_shows_and_saves_what_happened(client, db_path):
     page = client.get(f"{base}/review/1").text
     assert "What happened" in page and "Not recorded yet, so taken as planned." in page
     assert "Run: 2 in the calendar, 1 logged on Today. 1 may not have happened." in page
-    assert 'name="record_present"' in page and "Planned Wed 07:00" in page
+    assert 'name="record_present"' in page and "data-week-grid data-record" in page and f'"id": "{wed}"' in page
     assert f"/week/1/actual?next={base}/review/1" in page
     week2 = client.get(f"{base}/review/2").text
     assert "Record what happened once the week is over." in week2 and 'name="record_present"' not in week2
@@ -636,11 +651,13 @@ def test_review_shows_and_saves_what_happened(client, db_path):
     # A bad row stops the whole save, with the review answers kept.
     bad = {**record, f"done-{run.id}": "1", "slot_time": ["07:00", "7"]}
     response = post(client, f"{base}/review/1", bad)
-    assert response.status_code == 422 and "What happened: Run, time 2: use a time like 07:30." in response.text
+    assert response.status_code == 422 and "What happened: Run, Wed session 1: use a time like 07:30." in response.text
     assert repo.reviewed_weeks(cycle.id) == set() and repo.recorded_weeks(cycle.id) == set()
 
-    # Wednesday's run didn't happen: recorded with the review, and the score still comes from the count.
-    response = post(client, f"{base}/review/1", {**record, f"done-{run.id}": "1", "slot_time": ["07:00", ""]})
+    # Wednesday's run didn't happen, so only Monday's is posted: recorded with the review, and the
+    # score still comes from the count.
+    record = {key: value[:1] if isinstance(value, list) else value for key, value in record.items()}
+    response = post(client, f"{base}/review/1", {**record, f"done-{run.id}": "1", "slot_time": ["07:00"]})
     assert response.status_code == 302
     assert repo.weekly_scores(cycle.id) == {1: 0.5}
     assert repo.recorded_weeks(cycle.id) == {1}
@@ -648,7 +665,7 @@ def test_review_shows_and_saves_what_happened(client, db_path):
     assert "Against the plan: 1 didn&#39;t happen." in page and "may not have happened" not in page
 
     # Saving the review again without touching the section leaves the record as it is.
-    unchanged = {**record, "slot_time": ["07:00", ""], f"done-{run.id}": "2"}
+    unchanged = {**record, "slot_time": ["07:00"], f"done-{run.id}": "2"}
     assert post(client, f"{base}/review/1", unchanged).status_code == 302
     assert repo.recorded_weeks(cycle.id) == {1} and repo.weekly_scores(cycle.id) == {1: 1.0}
 

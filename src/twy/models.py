@@ -101,17 +101,18 @@ WEEK_LAYERS = ("plan", "actual")
 
 @dataclass
 class WeekItem:
-    """One session in a week: a tactic's planned time, a block occurrence or a one-off event.
+    """One session in a week: a tactic's planned session, a block occurrence or a one-off event.
 
     The "plan" layer is what you planned; after the week, the "actual" layer records what happened.
+    A tactic session may have a day but no time (start_min and duration_min both None).
     """
 
     cycle_id: int
     week_no: int
     kind: str  # tactic | block | event
     weekday: int
-    start_min: int
-    duration_min: int
+    start_min: int | None
+    duration_min: int | None
     layer: str = "plan"
     tactic_id: int | None = None
     block_id: int | None = None
@@ -124,12 +125,17 @@ class WeekItem:
     id: int | None = None
 
     @property
+    def timed(self) -> bool:
+        return self.start_min is not None
+
+    @property
     def slot(self) -> Slot:
+        assert self.start_min is not None and self.duration_min is not None, "an untimed session has no slot"
         return Slot(self.weekday, self.start_min, self.duration_min)
 
     @property
     def end_min(self) -> int:
-        return self.start_min + self.duration_min
+        return self.slot.end_min
 
 
 @dataclass

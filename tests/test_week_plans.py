@@ -15,6 +15,7 @@ from twy.week_plans import (
     parse_review_record,
     plan_form,
     plannable_weeks,
+    planned_on,
     posted_form,
     recordable,
     resolved_items,
@@ -25,6 +26,7 @@ from twy.week_plans import (
     shortfall,
     tactic_groups,
     unplanned_reminders,
+    week_anytime,
     week_ended,
     week_plan_check,
     week_record,
@@ -88,11 +90,17 @@ def test_parse_plan_rows_only_takes_this_weeks_tactics(repo):
     cycle, run, mocks = setup(repo)
     tactics = [run]  # week 1: the mock race starts in week 3
     rows = parse_plan_rows(cycle, 1, tactics, [], [tactic_row(run, "0", "07:00"), tactic_row(run, "2", "")])
-    assert [(i.weekday, i.start_min, i.duration_min, i.title) for i in rows] == [(0, 420, 30, "Run")]
+    # A session with no time is still a session on its day.
+    assert [(i.weekday, i.start_min, i.duration_min, i.title) for i in rows] == [
+        (0, 420, 30, "Run"),
+        (2, None, None, "Run"),
+    ]
     with pytest.raises(FormError, match="Reload the page"):
         parse_plan_rows(cycle, 1, tactics, [], [tactic_row(mocks, "0", "07:00")])
-    with pytest.raises(FormError, match="Run, time 2: must end by midnight"):
+    with pytest.raises(FormError, match="Run, Mon session 2: must end by midnight"):
         parse_plan_rows(cycle, 1, tactics, [], [tactic_row(run, "0", "07:00"), tactic_row(run, "0", "23:30", "60")])
+    with pytest.raises(FormError, match="Reload the page"):
+        parse_plan_rows(cycle, 1, tactics, [], [tactic_row(run, "7", "")])
     with pytest.raises(FormError, match="Reload the page"):
         parse_plan_rows(cycle, 1, tactics, [], [FormRow("meeting", time="07:00")])
 
@@ -168,7 +176,7 @@ def test_week_plan_check_covers_every_row(repo):
         tactic_row(run, "1", ""),
     ]
     data = week_plan_check(repo, cycle, 1, rows)
-    assert data["placed"] == {str(run.id): 1}
+    assert data["placed"] == {str(run.id): 2}  # the Tuesday run has no time, but it's placed
     assert data["rows"][0]["clashes"] == ["Overlaps Admin · Mon 08:00–08:30", "Overlaps an event · Mon 08:20–08:30"]
     assert data["rows"][1]["clashes"] == ["Overlaps Run · Mon 08:15–08:45", "Overlaps an event · Mon 08:20–08:30"]
     assert data["rows"][3] is None
@@ -184,12 +192,38 @@ def test_copy_prev_and_groups(repo):
     assert [(i.week_no, i.weekday, i.start_min, i.id) for i in copied] == [(3, 1, 420, None), (3, 3, 1080, None)]
 
     groups = {g.tactic.title: g for g in tactic_groups(repo, cycle, 3, copied)}
-    assert groups["Run"].placed == 2 and len(groups["Run"].rows) == 3  # one blank row for the third run
-    assert groups["Run"].rows[2] == {"day": "4", "time": "", "minutes": "60"}  # the day after the last
-    assert groups["Mock race"].placed == 0 and len(groups["Mock race"].rows) == 1
+    run_cells = groups["Run"].days
+    assert [c.day for c in run_cells] == [MON + timedelta(weeks=2, days=n) for n in range(7)]  # in week order
+    assert [c.count for c in run_cells] == [0, 1, 0, 1, 0, 0, 0] and groups["Run"].placed == 2
+    assert run_cells[3].sessions == [{"time": "18:00", "minutes": "60", "plan": ""}]
+    assert groups["Mock race"].placed == 0 and groups["Mock race"].over == 0
     assert [(t.title, n) for t, n in shortfall([run, mocks], copied)] == [("Run", 2), ("Mock race", 0)]
     save_week_plan(repo, cycle, 3, today, copied)
     assert next_week_to_plan(repo, cycle, today) == 4
+
+
+def test_cells_put_timed_sessions_first_and_count_over_target(repo):
+    cycle, run, _mocks = setup(repo)
+    untimed = WeekItem(cycle.id, 1, "tactic", 2, None, None, tactic_id=run.id)
+    items = [untimed, session(cycle, 1, run, 2, 600), session(cycle, 1, run, 2, 420), untimed]
+    [group] = tactic_groups(repo, cycle, 1, items)
+    assert [s["time"] for s in group.days[2].sessions] == ["07:00", "10:00", "", ""]
+    assert group.placed == 4 and group.over == 1  # Run is 3 a week
+    # Shown again after an error, a posted grid keeps its cells.
+    rows = rows_of(plan_form(repo, cycle, 1, items))
+    [again] = posted_form(repo, cycle, 1, rows).tactics
+    assert [c.sessions for c in again.days] == [c.sessions for c in group.days]
+
+
+def test_planned_on_and_anytime(repo):
+    cycle, run, _mocks = setup(repo)
+    wed = MON + timedelta(days=2)
+    assert planned_on(repo, cycle, wed) is None  # not planned
+    untimed = WeekItem(cycle.id, 1, "tactic", 2, None, None, tactic_id=run.id)
+    save_week_plan(repo, cycle, 1, MON, [untimed, untimed, session(cycle, 1, run, 2)])
+    assert planned_on(repo, cycle, wed) == {run.id: 3} and planned_on(repo, cycle, MON) == {}
+    [anytime] = week_anytime(repo, cycle, 1)
+    assert (anytime.day, anytime.label, anytime.context) == (wed, "Run ×2", "Fit")
 
 
 def test_reminders_this_week_and_next_from_review_day(repo):
@@ -252,10 +286,11 @@ def test_the_record_form_starts_from_the_plan(repo):
     form = actual_form(repo, cycle, 1, record)
     [run_group] = form.tactics  # the mock race starts in week 3
     mon, wed = (record.plan[0].id, record.plan[1].id)
-    assert [(r["time"], r["plan"], r["note"]) for r in run_group.rows] == [
-        ("07:00", str(mon), "Planned Mon 07:00"),
-        ("07:00", str(wed), "Planned Wed 07:00"),
-    ]
+    cells = run_group.days
+    assert cells[0].sessions == [{"time": "07:00", "minutes": "60", "plan": str(mon)}]
+    assert cells[2].sessions == [{"time": "07:00", "minutes": "60", "plan": str(wed)}]
+    assert cells[2].planned == [{"time": "07:00", "minutes": "60", "plan": "", "id": str(wed)}]
+    assert run_group.placed == 2
     [admin_group] = form.blocks
     assert admin_group.rows[0]["note"] == "Planned Fri 16:00" and form.events == []
 
@@ -270,8 +305,7 @@ def test_record_what_happened_then_compare(repo):
         return FormRow("tactic", str(run.id), day=day, time=time, minutes="60", plan=plan)
 
     rows = [
-        tactic(mon, "1", "07:00"),  # moved to Tuesday
-        tactic(wed, "2", ""),  # didn't happen
+        tactic(mon, "1", "07:00"),  # moved to Tuesday; Wednesday's didn't happen, so it isn't posted
         tactic("", "5", "09:00"),  # an extra run on Saturday
         FormRow("block", str(admin.id), "4:960", day="4", time="16:00", minutes="30", plan=fri),
     ]
@@ -294,22 +328,41 @@ def test_record_what_happened_then_compare(repo):
     ]
     assert "Dinner" in [s.title for s in view.sessions]  # events stay as context
 
-    # The form shows it back: the missed run blank with its plan, the extra marked as added.
-    run_rows = actual_form(repo, cycle, 1, week_record(repo, cycle, 1)).tactics[0].rows
-    assert [(r["time"], r["note"]) for r in run_rows] == [
-        ("07:00", "Planned Mon 07:00"),
-        ("", "Planned Wed 07:00 · didn't happen"),
-        ("09:00", "Added: wasn't in the plan"),
-    ]
+    # The form shows it back: what happened in each cell, beside what was planned there.
+    cells = actual_form(repo, cycle, 1, week_record(repo, cycle, 1)).tactics[0].days
+    assert [(c.count, len(c.planned)) for c in cells] == [(0, 1), (1, 0), (0, 1), (0, 0), (0, 0), (1, 0), (0, 0)]
+    assert cells[1].sessions[0]["plan"] == mon and cells[5].sessions[0]["plan"] == ""
 
     # Recording exactly the plan again means it went to plan: nothing is kept.
-    as_planned = [tactic(mon, "0", "07:00"), tactic(wed, "2", "07:00"), rows[3]]
+    as_planned = [tactic(mon, "0", "07:00"), tactic(wed, "2", "07:00"), rows[2]]
     record = week_record(repo, cycle, 1)
     assert (
         save_actual(repo, cycle, 1, after, parse_plan_rows(cycle, 1, [run], [admin], as_planned, record.plan_by_id))
         is False
     )
     assert repo.recorded_weeks(cycle.id) == set() and week_view(repo, cycle, 1, after).summary is None
+
+
+def test_untimed_sessions_compare_by_day(repo):
+    cycle, run, _admin = planned_week_one(repo)
+    after = MON + timedelta(days=8)
+    record = week_record(repo, cycle, 1)
+    mon, wed = (str(i.id) for i in record.plan[:2])
+
+    def tactic(plan, day, time=""):
+        return FormRow("tactic", str(run.id), day=day, time=time, minutes="60" if time else "", plan=plan)
+
+    # Monday's happened with no time noted, Wednesday's at another time, and one more with no time.
+    rows = [tactic(mon, "0"), tactic(wed, "2", "18:00"), tactic("", "3")]
+    items = parse_plan_rows(cycle, 1, [run], [], rows, record.plan_by_id)
+    save_actual(repo, cycle, 1, after, items)
+    view = week_view(repo, cycle, 1, after)
+    assert view.summary == "1 moved, 1 didn't happen, 1 added"  # the Admin block wasn't recorded
+    assert [(a.day.weekday(), a.label, a.happened, a.planned) for a in view.anytime] == [
+        (0, "Run", None, None),  # planned at 07:00, happened at no time in particular: kept
+        (3, "Run", 1, 0),
+    ]
+    assert [label for _g, label in view.ghosts] == ["moved to Wed 18:00", "didn't happen"]
 
 
 def test_record_links_are_checked(repo):
@@ -330,7 +383,7 @@ def test_an_unplanned_week_can_still_be_recorded(repo):
     cycle, run, _mocks = setup(repo)
     after = MON + timedelta(days=8)
     form = actual_form(repo, cycle, 1, week_record(repo, cycle, 1))
-    assert [g.tactic.title for g in form.tactics] == ["Run"] and form.tactics[0].rows[0]["plan"] == ""
+    assert [g.tactic.title for g in form.tactics] == ["Run"] and form.tactics[0].placed == 0
     items = parse_plan_rows(
         cycle, 1, [run], [], [FormRow("tactic", str(run.id), day="2", time="18:00", minutes="30")], {}
     )
@@ -361,13 +414,15 @@ def test_review_saves_what_happened_only_if_it_was_changed(repo):
     cycle, _run, _admin = planned_week_one(repo)
     shown = rows_of(review_record(repo, cycle, 1, MON + timedelta(days=8)).form)
     assert parse_review_record(repo, cycle, 1, shown) is None  # left as it was
-    changed = [replace(shown[1], time="")] + shown[:1] + shown[2:]  # Wednesday's run didn't happen
+    changed = shown[:1] + shown[2:]  # Wednesday's run didn't happen
     items = parse_review_record(repo, cycle, 1, changed)
     assert items is not None and len(items) == len(shown) - 1
+    no_time = [replace(shown[0], time="")] + shown[1:]  # Monday's run happened, at no time in particular
+    assert [i.start_min for i in parse_review_record(repo, cycle, 1, no_time) if i.kind == "tactic"] == [None, 420]
 
     # A week that wasn't planned: leaving the section alone records nothing.
     later, run2, _mocks2 = setup(repo, start=MON + timedelta(weeks=20))
     shown = rows_of(review_record(repo, later, 1, later.start_date + timedelta(days=8)).form)
     assert parse_review_record(repo, later, 1, shown) is None
-    ran = [replace(shown[0], time="18:00")]
+    ran = [FormRow("tactic", str(run2.id), day="2", time="18:00", minutes="30")]
     assert [i.tactic_id for i in parse_review_record(repo, later, 1, ran)] == [run2.id]

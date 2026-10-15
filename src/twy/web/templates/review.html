@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_reflection.html" import reflection_fields %}
-{% from "_slots.html" import tactic_group, block_group with context %}
+{% from "_slots.html" import tactic_grid, block_group with context %}
 {% block title %}Review · {{ cycle.name }}{% endblock %}
 {% block body_class %}wide{% endblock %}
 {% block content %}
@@ -93,8 +93,8 @@
     <details{{ ' open' if record_open }}>
       <summary>Where each session really happened</summary>
       <input type="hidden" name="record_present" value="1">
-      <p class="muted small">Change a time if it moved, clear it if it didn't happen, or add one you didn't plan. Saved with the review; it doesn't change your score.</p>
-      {% for group in what_happened.form.tactics %}{{ tactic_group(group, record=True) }}{% endfor %}
+      <p class="muted small">Tap a day to change how many sessions really happened there, or when. Change a block's time if it moved, or clear it if it didn't happen. Saved with the review; it doesn't change your score.</p>
+      {% if what_happened.form.tactics %}{{ tactic_grid(what_happened.form.tactics, grid_days, record=True) }}{% endif %}
       {% for group in what_happened.form.blocks %}{{ block_group(group, record=True) }}{% endfor %}
     </details>
     {% endif %}

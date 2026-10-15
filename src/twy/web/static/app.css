@@ -567,8 +567,102 @@ body.onboarding { padding-bottom: 24px; }
 .allday { margin: 4px 0 0; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
 .import-error { color: var(--warn); }
 .tl-allday { display: flex; flex-direction: column; gap: 2px; height: 34px; margin-bottom: 4px; overflow: hidden; }
-.timeline.has-allday .tl-hours { margin-top: 70px; } /* .tl-head 32px + .tl-allday 38px */
 .tl-allday .allday { margin: 0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Tactic sessions with no set time: a day's "Anytime" line and its chips. */
+.anytime { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); }
+.anytime-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.anytime-chip:hover { text-decoration: none; background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.tl-anytime { display: flex; flex-direction: column; gap: 2px; height: 58px; margin-bottom: 4px; overflow-y: auto; }
+.tl-anytime .anytime-chip { font-size: 0.7rem; padding: 0 6px; }
+
+/* Week grid: a row per tactic, a cell per day with how many sessions go there. On phones the name and
+   total sit on their own line above seven equal cells; from 768px they share one line. */
+.week-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.wg-head, .wg-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.wg-head { position: sticky; top: var(--topbar-h); z-index: 2; padding: 4px 0; background: var(--surface); }
+.wg-day { text-align: center; font-size: 0.75rem; color: var(--muted); line-height: 1.2; }
+.wg-day small { display: block; font-size: 0.75rem; }
+.wg-day.today { color: var(--accent); font-weight: 600; }
+.wg-row { padding-top: 10px; border-top: 1px solid var(--border); row-gap: 6px; }
+.wg-name { grid-column: 1 / 6; display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.wg-name strong { overflow-wrap: anywhere; }
+.wg-side { grid-column: 6 / -1; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
+.wg-total { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--good); }
+.wg-total.short { color: var(--warn); }
+.wg-menu { position: relative; }
+.wg-menu summary { list-style: none; cursor: pointer; padding: 2px 8px; border-radius: 8px; color: var(--muted); font-weight: 700; }
+.wg-menu summary::-webkit-details-marker { display: none; }
+.wg-menu summary:hover { background: var(--surface-2); }
+.wg-menu-list {
+  position: absolute;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 10.5em;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+}
+.wg-menu-list .btn.small { margin: 0; justify-content: flex-start; }
+.wg-cell { min-width: 0; }
+.cell {
+  width: 100%;
+  min-height: 48px;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+  font: inherit;
+  line-height: 1.15;
+  cursor: pointer;
+}
+.cell:hover { border-color: var(--accent); }
+.cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cell .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.cell .t, .cell .p { font-size: 0.68rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.cell .p { color: var(--warn); }
+.cell.zero { background: var(--surface); color: var(--muted); }
+.cell.clash { border: 2px dashed var(--bad); }
+@media (min-width: 768px) {
+  .wg-head, .wg-row { grid-template-columns: minmax(0, 1.7fr) repeat(7, minmax(0, 1fr)) minmax(4.8em, auto); }
+  .wg-head::before { content: ""; }
+  .wg-head::after { content: ""; }
+  .wg-name { grid-column: 1; grid-row: 1; }
+  .wg-side { grid-column: 9; grid-row: 1; }
+}
+
+/* The cell editor: how many sessions on that day, and an optional time for each. Pinned near the top
+   so the − / + buttons stay put as rows are added. */
+.cell-pop:popover-open { margin: 10vh auto auto; max-height: 80vh; overflow-y: auto; }
+.cell-pop h2 { margin-bottom: 2px; }
+.cell-pop [hidden] { display: none !important; }
+.cell-pop .count-step { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.cell-pop .count-step output { min-width: 2ch; text-align: center; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cell-pop .count-step button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 1.3rem; cursor: pointer; }
+.cell-pop .pop-sessions { display: flex; flex-direction: column; gap: 8px; }
+.cell-pop .pop-session { display: grid; grid-template-columns: 2.2em minmax(0, 1.4fr) minmax(0, 1fr) 36px; gap: 6px; align-items: center; }
+.cell-pop .pop-session input { width: 100%; min-width: 0; padding-left: 8px; padding-right: 6px; }
+.cell-pop .pop-session .slot-note { grid-column: 1 / -1; }
 
 /* Plan vs what happened: the plan's outline where a session was meant to be, and a tag on what changed. */
 .compare-summary { font-weight: 600; }
@@ -619,7 +713,7 @@ a.session:hover { text-decoration: none; background: color-mix(in srgb, var(--ki
   .tl-head { height: 32px; text-align: center; font-size: 0.85rem; color: var(--muted); }
   .tl-day.today .tl-head { color: var(--accent); }
   .tl-hours, .tl-body { position: relative; height: calc(var(--span) * 0.9px); }
-  .tl-hours { margin-top: 32px; }
+  .tl-hours { margin-top: var(--tl-top, 32px); } /* .tl-head 32px, + .tl-allday 38px, + .tl-anytime 62px */
   .tl-hours span { position: absolute; right: 4px; transform: translateY(-50%); font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
   .tl-body {
     border: 1px solid var(--border);

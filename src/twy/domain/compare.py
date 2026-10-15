@@ -16,7 +16,19 @@ STATUSES = ("kept", "moved", "dropped", "added")
 
 
 def when(item: WeekItem) -> str:
-    return f"{WEEKDAY_SHORT[item.weekday]} {hhmm(item.start_min)}"
+    """ "Tue 07:00", or just "Tue" for a session with no set time."""
+    day = WEEKDAY_SHORT[item.weekday]
+    return day if item.start_min is None else f"{day} {hhmm(item.start_min)}"
+
+
+def same_place(plan: WeekItem, actual: WeekItem) -> bool:
+    """Whether a recorded session happened where it was planned. Without a time on either side,
+    the day is all there is to compare."""
+    if plan.weekday != actual.weekday:
+        return False
+    if not (plan.timed and actual.timed):
+        return True
+    return (plan.start_min, plan.duration_min) == (actual.start_min, actual.duration_min)
 
 
 def comparable(items: Iterable[WeekItem]) -> list[WeekItem]:
@@ -66,7 +78,7 @@ def compare(plan: list[WeekItem], actual: list[WeekItem] | None) -> list[Change]
         a = by_plan.pop(p.id, None)
         if a is None:
             changes.append(Change("dropped", p, None))
-        elif (a.weekday, a.start_min, a.duration_min) == (p.weekday, p.start_min, p.duration_min):
+        elif same_place(p, a):
             changes.append(Change("kept", p, a))
         else:
             changes.append(Change("moved", p, a))
@@ -76,7 +88,7 @@ def compare(plan: list[WeekItem], actual: list[WeekItem] | None) -> list[Change]
 
 
 def _sort_key(item: WeekItem) -> tuple[int, int]:
-    return item.weekday, item.start_min
+    return item.weekday, -1 if item.start_min is None else item.start_min
 
 
 def summary(changes: Iterable[Change]) -> str:

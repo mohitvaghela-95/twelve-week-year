@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_slots.html" import tactic_group, block_group with context %}
+{% from "_slots.html" import tactic_grid, block_group with context %}
 {% block title %}What happened in week {{ week_no }} · {{ cycle.name }}{% endblock %}
 {% block body_class %}wide{% endblock %}
 {% block back %}{{ next_url or url_for('web.week', cycle_id=cycle.id, week_no=week_no) }}{% endblock %}{% block back_label %}Week {{ week_no }}{% endblock %}
@@ -8,14 +8,21 @@
   <h1>What happened in week {{ week_no }}</h1>
   <span class="tag">{{ first.day }} {{ first.strftime("%b") }} – {{ last.day }} {{ last.strftime("%b") }}</span>
 </div>
-<p class="muted">{{ cycle.name }} · {% if record.planned %}the plan stays as it was. Change a time to where it really happened, clear it if it didn't, or add one you didn't plan.{% else %}this week wasn't planned, so there's nothing to compare. You can still note what happened.{% endif %}</p>
+<p class="muted">{{ cycle.name }} · {% if record.planned %}the plan stays as it was. Tap a day to change how many sessions really happened there, or when.{% else %}this week wasn't planned, so there's nothing to compare. You can still note what happened.{% endif %}</p>
 {% if summary %}<p class="compare-summary">{{ summary }}</p>{% endif %}
 
+<form method="post" data-guard id="record-form">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+{% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+{% if form.tactics %}
+<section class="card">
+  <h2>Tactics</h2>
+  {{ tactic_grid(form.tactics, grid_days, record=True) }}
+</section>
+{% endif %}
+
 <div class="split">
-<form method="post" class="card stack" data-guard>
-  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-  {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-  {% for group in form.tactics %}{{ tactic_group(group, record=True) }}{% endfor %}
+<div class="card stack">
   {% for group in form.blocks %}{{ block_group(group, record=True) }}{% endfor %}
   {% if not form.tactics and not form.blocks %}<p class="muted">Nothing to record in week {{ week_no }}.</p>{% endif %}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
@@ -23,7 +30,7 @@
     <a class="btn" href="{{ next_url or url_for('web.week', cycle_id=cycle.id, week_no=week_no) }}">Cancel</a>
     <button class="btn primary">Save what happened</button>
   </div>
-</form>
+</div>
 
 <section class="card busy">
   <div class="card-head"><h2>{{ "The plan" if record.planned else "Blocks" }}{{ " + your calendar" if imported.timed or imported.all_day }}</h2></div>
@@ -31,24 +38,29 @@
   <div class="busy-day">
     <h3>{{ day.strftime("%a") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h3>
     {% for title in imported.all_day.get(day, []) %}<p class="allday small">{{ title }}</p>{% endfor %}
+    {% if anytime.get(day) %}<p class="anytime small">Anytime: {{ anytime[day]|map(attribute="label")|join(", ") }}</p>{% endif %}
     {% for s in items %}
     <div class="session kind-{{ s.kind }}">
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
       <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}</span></span>
     </div>
     {% else %}
-    {% if not imported.all_day.get(day) %}<p class="muted small">Nothing planned.</p>{% endif %}
+    {% if not imported.all_day.get(day) and not anytime.get(day) %}<p class="muted small">Nothing planned.</p>{% endif %}
     {% endfor %}
   </div>
   {% endfor %}
   {% if record.recorded %}
-  <form method="post" class="reset-actual" data-confirm="Forget what you recorded, so week {{ week_no }} reads as having gone to plan?">
-    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="reset">
-    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-    <button class="btn small">Back to as planned</button>
-  </form>
+  <p class="reset-actual"><button class="btn small" form="reset-actual">Back to as planned</button></p>
   {% endif %}
 </section>
 </div>
+</form>
+{% if record.recorded %}
+{#- Outside the record form (forms can't nest); the button above submits it. -#}
+<form method="post" id="reset-actual" hidden data-confirm="Forget what you recorded, so week {{ week_no }} reads as having gone to plan?">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="reset">
+  {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+</form>
+{% endif %}
 {% endblock %}
