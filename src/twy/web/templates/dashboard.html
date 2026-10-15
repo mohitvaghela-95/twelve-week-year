@@ -31,7 +31,8 @@
   <p class="eyebrow">{{ STATUS_LABELS[cycle.status] }}</p>
   <h1>{{ cycle.name }}</h1>
   <p class="where">{{ status.where }}</p>
-  <p class="muted small">{{ cycle.start_date.strftime("%d %b %Y") }} → {{ end.strftime("%d %b %Y") }}</p>
+  <p class="muted small">{{ cycle.start_date.strftime("%d %b %Y") }} → {{ end.strftime("%d %b %Y") }}
+    · <a href="{{ url_for('web.cycle_edit', cycle_id=cycle.id) }}">{{ "Delete…" if cycle.status == "closed" else "Edit cycle" }}</a></p>
 </section>
 
 <div class="stats">

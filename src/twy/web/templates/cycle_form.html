@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_form.html" import delete_form %}
+{% block title %}{{ "Delete cycle" if read_only else "Edit cycle" }}{% endblock %}
+{% block back %}{{ url_for('web.cycles') }}{% endblock %}{% block back_label %}Cycles{% endblock %}
+{% block content %}
+{% if read_only %}
+<h1>Delete cycle</h1>
+<section class="card stack">
+  <h2>{{ cycle.name }}</h2>
+  <p class="muted small">{{ cycle.start_date.strftime("%d %b %Y") }} · closed. Closed cycles are read-only, but you can delete one you no longer want to keep.</p>
+</section>
+{% else %}
+<h1>Edit cycle</h1>
+<form method="post" class="card stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <label for="name">Name</label>
+  <input id="name" name="name" value="{{ form.name }}" required autofocus>
+  {% if start_locked %}
+  <label for="start">Start date</label>
+  <input id="start" type="date" value="{{ cycle.start_date.isoformat() }}" disabled>
+  <p class="muted small">Locked: days are already logged or weeks reviewed in this cycle, and moving the start would shift them into other weeks.</p>
+  {% else %}
+  <label for="start">Start date <span class="muted">(moves to the next {{ week_start_name }})</span></label>
+  <input id="start" name="start" type="date" value="{{ form.start }}" required data-snap data-week-start="{{ week_start }}">
+  <p class="muted small" data-snap-preview></p>
+  {% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <div class="row-buttons">
+    <a class="btn" href="{{ url_for('web.dashboard', cycle_id=cycle.id) }}">Cancel</a>
+    <button class="btn primary">Save cycle</button>
+  </div>
+</form>
+{% endif %}
+{{ delete_form(url_for('web.cycle_delete', cycle_id=cycle.id), "Delete cycle", "Delete “" ~ cycle.name ~ "” and everything in it: goals, tactics, logs, week plans and reviews? This can't be undone. Download a backup from Settings first if you're unsure.") }}
+{% endblock %}

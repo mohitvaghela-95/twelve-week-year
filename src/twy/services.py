@@ -213,6 +213,33 @@ def create_cycle(repo: Repo, name: str, start: date, copy_from: int | None = Non
     return cycle
 
 
+def edit_cycle(repo: Repo, cycle: Cycle, name: str, start_text: str) -> Cycle:
+    """Rename a cycle, and move its start while nothing dated has been recorded in it."""
+    if cycle.status == "closed":
+        raise FormError("A closed cycle can't be edited, only deleted.")
+    # Blank means the date field was locked (disabled fields aren't posted). A date left alone isn't
+    # snapped again: the week-start setting may have changed since the cycle was created.
+    unchanged = start_text.strip() in ("", cycle.start_date.isoformat())
+    name, start = parse_cycle_form(name, cycle.start_date.isoformat() if unchanged else start_text, repo.week_start)
+    if unchanged:
+        start = cycle.start_date
+    elif start != cycle.start_date and repo.cycle_has_activity(cycle.id):
+        raise FormError("The start date is locked once days are logged or weeks reviewed.")
+    week_start = cycle.week_start if start == cycle.start_date else repo.week_start
+    edited = replace(cycle, name=name, start_date=start, week_start=week_start)
+    repo.update_cycle(edited)
+    return edited
+
+
+RESET_WORD = "RESET"
+
+
+def factory_reset(repo: Repo, confirm_text: str) -> None:
+    if confirm_text.strip() != RESET_WORD:
+        raise FormError(f"Type {RESET_WORD} to confirm. Nothing was deleted.")
+    repo.factory_reset()
+
+
 @dataclass
 class CycleStatus:
     """What the dashboard says about a cycle today."""

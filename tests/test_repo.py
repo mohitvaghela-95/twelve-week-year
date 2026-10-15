@@ -325,3 +325,60 @@ def test_prompts_and_day_reviews_keep_past_wording(repo):
     review = repo.get_day_review(cycle.id, day)
     assert [(a.prompt_id, a.label, a.value) for a in review.answers] == [(None, "Energy", "4")]
     assert repo.reviewed_days(cycle.id, MON, date(2026, 10, 11)) == {day}
+
+
+def test_update_and_delete_cycle(repo):
+    cycle, _, run, _ = make_plan(repo)
+    repo.save_block(
+        Block(id=None, cycle_id=cycle.id, title="Admin", slots=[Slot(weekday=0, start_min=540, duration_min=30)])
+    )
+    repo.log_tactic(run.id, MON, 1)
+    repo.save_day_review(DayReview(cycle_id=cycle.id, day=MON))
+    repo.save_cycle_review(CycleReview(cycle_id=cycle.id, lessons="x"))
+    keep = repo.create_cycle("Next", date(2027, 1, 4), 0)
+
+    repo.update_cycle(replace(cycle, name="Renamed", start_date=date(2026, 10, 4), week_start=6))
+    assert repo.get_cycle(cycle.id) == replace(cycle, name="Renamed", start_date=date(2026, 10, 4), week_start=6)
+
+    repo.delete_cycle(cycle.id)
+    with pytest.raises(KeyError):
+        repo.get_cycle(cycle.id)
+    for table in ("goal", "tactic", "tactic_log", "block", "slot", "day_review", "cycle_review"):
+        assert repo.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
+    assert [c.id for c in repo.list_cycles()] == [keep.id]
+
+
+def test_cycle_has_activity(repo):
+    cycle, _, run, _ = make_plan(repo)
+    assert not repo.cycle_has_activity(cycle.id)
+    # A week plan is stored by week and weekday, so it moves with the start date: not activity.
+    repo.conn.execute(
+        "INSERT INTO week_item (cycle_id, week_no, layer, kind, weekday, start_min, duration_min) "
+        "VALUES (?, 1, 'plan', 'tactic', 0, 540, 30)",
+        (cycle.id,),
+    )
+    assert not repo.cycle_has_activity(cycle.id)
+    repo.log_tactic(run.id, MON, 1)
+    assert repo.cycle_has_activity(cycle.id)
+    repo.log_tactic(run.id, MON, -1)  # back to nothing logged
+    other = repo.create_cycle("Other", date(2027, 1, 4), 0)
+    repo.save_day_review(DayReview(cycle_id=other.id, day=date(2027, 1, 4)))
+    assert repo.cycle_has_activity(other.id)
+
+
+def test_factory_reset(repo):
+    make_plan(repo)
+    repo.set_setting("week_start", "6")
+    repo.set_vision("long_term", "Free")
+    first = repo.list_prompts("daily")[0]
+    repo.delete_prompt(first.id)
+    repo.save_prompt(Prompt(id=None, scope="weekly", label="Mine"))
+
+    repo.factory_reset()
+    assert not repo.is_configured and repo.list_cycles() == [] and repo.get_vision("long_term") == ""
+    assert [(p.label, p.position) for p in repo.list_prompts("daily")] == [
+        ("What went well?", 0),
+        ("What got in the way?", 1),
+        ("Top tactics for tomorrow", 2),
+    ]
+    assert [p.label for p in repo.list_prompts("weekly")] == ["What got in the way?", "One fix for next week"]

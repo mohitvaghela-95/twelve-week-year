@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import date, datetime
 
+from twy.db import DEFAULT_PROMPTS
 from twy.domain.conflicts import DEFAULT_DAY_WINDOW
 from twy.domain.guardrails import DEFAULT_MAX_WEEKLY_ITEMS
 from twy.models import (
@@ -203,9 +204,48 @@ class Repo:
     def update_cycle(self, cycle: Cycle) -> None:
         with self.conn:
             self.conn.execute(
-                "UPDATE cycle SET name = ?, start_date = ?, status = ? WHERE id = ?",
-                (cycle.name, cycle.start_date.isoformat(), cycle.status, cycle.id),
+                "UPDATE cycle SET name = ?, start_date = ?, week_start = ?, status = ? WHERE id = ?",
+                (cycle.name, cycle.start_date.isoformat(), cycle.week_start, cycle.status, cycle.id),
             )
+
+    def delete_cycle(self, cycle_id: int) -> None:
+        """Everything in the cycle (goals, tactics, logs, reviews, week plans) goes with it via ON DELETE CASCADE."""
+        with self.conn:
+            self.conn.execute("DELETE FROM cycle WHERE id = ?", (cycle_id,))
+
+    def cycle_has_activity(self, cycle_id: int) -> bool:
+        """Has anything been logged, recorded or reviewed? Dated rows would land in other weeks if the start moved.
+
+        Week plans don't count: they're stored by week number and weekday, so they move with the start.
+        """
+        return bool(
+            self.conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM tactic_log l JOIN tactic t ON t.id = l.tactic_id "
+                "               JOIN goal g ON g.id = t.goal_id WHERE g.cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM goal_progress p JOIN goal g ON g.id = p.goal_id WHERE g.cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM day_review WHERE cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM answer WHERE cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM week_review WHERE cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM week_entry WHERE cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM cycle_review WHERE cycle_id = :c)"
+                " OR EXISTS (SELECT 1 FROM week_status WHERE cycle_id = :c AND recorded_at IS NOT NULL)"
+                " OR EXISTS (SELECT 1 FROM week_item WHERE cycle_id = :c AND layer = 'actual')",
+                {"c": cycle_id},
+            ).fetchone()[0]
+        )
+
+    def factory_reset(self) -> None:
+        """Back to a new install: no cycles, vision or settings, and the default prompts."""
+        with self.conn:
+            for table in ("cycle", "vision", "settings", "prompt"):
+                self.conn.execute(f"DELETE FROM {table}")
+            positions: dict[str, int] = {}
+            for scope, label, kind in DEFAULT_PROMPTS:
+                positions[scope] = positions.get(scope, -1) + 1
+                self.conn.execute(
+                    "INSERT INTO prompt (scope, position, label, kind) VALUES (?, ?, ?, ?)",
+                    (scope, positions[scope], label, kind),
+                )
 
     def set_cycle_status(self, cycle_id: int, status: str) -> None:
         with self.conn:

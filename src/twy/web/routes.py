@@ -52,11 +52,14 @@ from twy.models import (
 )
 from twy.repo import Repo
 from twy.services import (
+    RESET_WORD,
     FormError,
     close_cycle,
     create_cycle,
     cycle_status,
     default_review_week,
+    edit_cycle,
+    factory_reset,
     fmt_num,
     loggable,
     parse_alert_minutes,
@@ -341,6 +344,48 @@ def cycles():
             }
         )
     return render_template("cycles.html", rows=rows, can_create=r.current_cycle() is None, tab="cycles")
+
+
+@bp.route("/c/<int:cycle_id>/edit", methods=["GET", "POST"])
+def cycle_edit(cycle_id: int):
+    """Rename or re-date a cycle. Closed cycles reach this page only to be deleted."""
+    r = repo()
+    cycle = load_cycle(cycle_id)
+    read_only = cycle.status == "closed"
+    if read_only and request.method == "POST":
+        abort(403, "This cycle is closed and read-only.")
+    form = {"name": cycle.name, "start": cycle.start_date.isoformat()}
+    error = None
+    if request.method == "POST":
+        form = {k: request.form.get(k, "") for k in ("name", "start")}
+        try:
+            edit_cycle(r, cycle, form["name"], form["start"])
+        except FormError as e:
+            error = str(e)
+        else:
+            flash("Cycle saved.")
+            return redirect(url_for(".dashboard", cycle_id=cycle.id))
+    week_start = r.week_start
+    return render_template(
+        "cycle_form.html",
+        cycle=cycle,
+        form=form,
+        error=error,
+        read_only=read_only,
+        start_locked=r.cycle_has_activity(cycle.id),
+        week_start=week_start,
+        week_start_name=WEEKDAY_NAMES[week_start],
+        tab="cycles",
+    ), 422 if error else 200
+
+
+@bp.post("/c/<int:cycle_id>/delete")
+def cycle_delete(cycle_id: int):
+    r = repo()
+    cycle = load_cycle(cycle_id)
+    r.delete_cycle(cycle.id)
+    flash(f"Deleted “{cycle.name}”.")
+    return redirect(url_for(".cycles") if r.list_cycles() else url_for(".index"))
 
 
 # -- dashboard and trend ----------------------------------------------------------
@@ -1201,6 +1246,7 @@ def settings_page(fields: dict, error: str | None = None, import_text: str | Non
         db_path=current_app.config["TWY_DB"],
         prompts={scope: r.list_prompts(scope) for scope in PROMPT_SCOPES},
         prompt_kinds=PROMPT_KINDS,
+        RESET_WORD=RESET_WORD,
         tab="settings",
     )
 
@@ -1296,6 +1342,17 @@ def calendar_reset():
     repo().rotate_calendar_token()
     flash("New calendar link created. Subscribe again with it; the old link no longer works.", "warn")
     return redirect(url_for(".settings", _anchor="calendar"))
+
+
+@bp.post("/settings/reset")
+def settings_reset():
+    try:
+        factory_reset(repo(), request.form.get("confirm", ""))
+    except FormError as e:
+        flash(str(e), "warn")
+        return redirect(url_for(".settings", _anchor="reset"))
+    flash("Everything was deleted. Set twy up again to start fresh.")
+    return redirect(url_for(".setup"))
 
 
 @bp.get("/calendar/<token>.ics")

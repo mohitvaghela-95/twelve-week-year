@@ -5,13 +5,16 @@
 <div class="page-head"><h1>Cycles</h1>{% if can_create %}<a class="btn small" href="{{ url_for('web.new_cycle') }}">+ New</a>{% endif %}</div>
 {% for row in rows %}
 {% set c = row.cycle %}
-<a class="card cycle-card" href="{{ url_for('web.dashboard', cycle_id=c.id) }}">
-  <div class="card-head"><h2>{{ c.name }}</h2><span class="tag">{{ STATUS_LABELS[c.status] }}</span></div>
+<div class="card cycle-card">
+  <div class="card-head"><h2><a class="card-cover" href="{{ url_for('web.dashboard', cycle_id=c.id) }}">{{ c.name }}</a></h2><span class="tag">{{ STATUS_LABELS[c.status] }}</span></div>
   <p class="muted small">{{ c.start_date.strftime("%d %b %Y") }} → {{ row.end.strftime("%d %b %Y") }}</p>
-  <p>Average <strong class="text-{{ row.average|band }}">{{ row.average|score }}</strong>{% if row.goals_hit %} · goals hit {{ row.goals_hit }}{% endif %}</p>
-</a>
+  <div class="card-head">
+    <p>Average <strong class="text-{{ row.average|band }}">{{ row.average|score }}</strong>{% if row.goals_hit %} · goals hit {{ row.goals_hit }}{% endif %}</p>
+    <a class="card-action small" href="{{ url_for('web.cycle_edit', cycle_id=c.id) }}" aria-label="{{ ('Delete “' if c.status == 'closed' else 'Edit “') ~ c.name ~ '”' }}">{{ "Delete…" if c.status == "closed" else "Edit" }}</a>
+  </div>
+</div>
 {% else %}
 <section class="card empty"><p>No cycles yet.</p><a class="btn primary block" href="{{ url_for('web.new_cycle') }}">Start a cycle</a></section>
 {% endfor %}
-<p class="muted small">Closed cycles are read-only.{% if not can_create %} Close the current cycle at Week 13 to start the next.{% endif %}</p>
+<p class="muted small">Closed cycles are read-only, but you can delete them.{% if not can_create %} Close the current cycle at Week 13 to start the next.{% endif %}</p>
 {% endblock %}

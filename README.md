@@ -11,7 +11,7 @@ A phone-friendly web app for running *The 12 Week Year* (Moran & Lennington): vi
 - **Trend:** a 12-week chart with the 85% line, plus weekly notes.
 - **Week 13:** final values, hit or missed, lessons, then **Close cycle & start next** (which can copy the plan).
 - **Week:** the week's sessions, as an agenda on the phone and a timeline on desktop. Overlaps are flagged. **Plan this week** places your tactics; tap a session for its details and an Edit button.
-- **Cycles, Vision, Settings:** past cycles are read-only. Settings has your reflection prompts, the backup download and the calendar link.
+- **Cycles, Vision, Settings:** rename a cycle from its **Edit** link. You can also move its start date until a day is logged or a week reviewed. Deleting a cycle removes everything in it. Past cycles are read-only, but you can still delete them. Settings has your reflection prompts, the backup download, the calendar link and **Reset everything**. Reset everything wipes all cycles, the vision, prompts and settings so you start again from setup.
 
 On a phone the tab bar holds Home, Today, Plan, Review and More (Week, Trend, Week 13, Cycles, Vision, Settings). On a wider screen every page is in the sidebar.
 
