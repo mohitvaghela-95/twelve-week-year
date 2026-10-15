@@ -4,7 +4,8 @@ Tactics have no fixed times. Each week you place its sessions around whatever el
 the book's "plan your week" step. Blocks stay weekly templates: a week that hasn't been planned
 shows them as they are, and saving a week's plan stores its block occurrences alongside the
 tactic sessions, so a past week keeps the plan it had. A week's plan can also skip or move a
-block for that week only, and hold one-off events. No Flask imports here.
+block for that week only, and hold one-off events. Events from your other calendars (see
+twy.calendars) show alongside, and count when checking for clashes. No Flask imports here.
 """
 
 from collections import Counter
@@ -13,10 +14,11 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from itertools import zip_longest
 
+from twy.calendars import all_day_dates, busy, day_spans
 from twy.domain.conflicts import Placed, placed_for_week
 from twy.domain.dates import EXECUTION_WEEKS, REVIEW_WEEK, current_week, week_range
 from twy.domain.schedule import Session, planning_offset, sessions_from_items, template_items
-from twy.models import WEEKDAY_SHORT, Block, Cycle, Tactic, WeekItem, hhmm
+from twy.models import WEEKDAY_SHORT, Block, Cycle, Slot, Tactic, WeekItem, hhmm
 from twy.repo import Repo
 from twy.services import FormError, clash_hints, form_slots, parse_slot_row
 
@@ -64,6 +66,58 @@ def week_sessions(repo: Repo, cycle: Cycle, week_no: int) -> list[Session]:
     contexts = {t.id: goals.get(t.goal_id, "") for t in repo.list_tactics(cycle.id)}
     kinds = {b.id: b.kind for b in repo.list_blocks(cycle.id)}
     return sessions_from_items(cycle, week_no, resolved_items(repo, cycle, week_no), contexts, kinds)
+
+
+@dataclass
+class Imported:
+    """A week's events from your other calendars, ready to show."""
+
+    timed: list[Session] = field(default_factory=list)  # split at midnight, one per day
+    all_day: dict[date, list[str]] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+
+    def on(self, day: date) -> list[Session]:
+        return [s for s in self.timed if s.day == day]
+
+
+def imports_for_week(repo: Repo, cycle: Cycle, week_no: int) -> Imported:
+    """Events from the calendar links in Settings during one cycle week (none if there are no links)."""
+    urls = repo.import_urls
+    if not urls:
+        return Imported()
+    first, last = week_range(cycle.start_date, week_no)
+    events, errors = busy(urls, first, last)
+    imported = Imported(errors=errors)
+    for n, event in enumerate(events, start=1):
+        if event.all_day:
+            for day in all_day_dates(event, first, last):
+                imported.all_day.setdefault(day, []).append(event.title)
+            continue
+        for day, start, end in day_spans(event, first, last):
+            imported.timed.append(
+                Session(
+                    day=day,
+                    start_min=start,
+                    duration_min=end - start,
+                    title=event.title,
+                    kind="import",
+                    owner="import",
+                    owner_id=None,
+                    key=f"import-{n}-{day:%Y%m%d}",
+                    cycle_id=cycle.id or 0,
+                    week_no=week_no,
+                    context="Your calendar",
+                )
+            )
+    return imported
+
+
+def import_placed(imported: Imported, week_no: int) -> list[Placed]:
+    """Timed imported events for clash checks (all-day ones never clash)."""
+    return [
+        Placed(s.title, "import", None, (week_no, week_no), Slot(s.day.weekday(), s.start_min, s.duration_min))
+        for s in imported.timed
+    ]
 
 
 def shortfall(tactics: list[Tactic], items: list[WeekItem]) -> list[tuple[Tactic, int]]:
@@ -342,7 +396,7 @@ def week_plan_check(repo: Repo, cycle: Cycle, week_no: int, rows: list[FormRow])
     others = placed_for_week(
         week_no,
         [i for i in resolved_items(repo, cycle, week_no) if i.kind == "block" and i.block_id not in posted],
-    )
+    ) + import_placed(imports_for_week(repo, cycle, week_no), week_no)
     placed = Counter(p.owner_id for p in placed_rows if p is not None and p.owner == "tactic")
     return {
         "rows": clash_hints(placed_rows, others, repo.day_window),

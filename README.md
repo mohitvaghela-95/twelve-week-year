@@ -31,6 +31,8 @@ Add **time blocks** on the Plan page for admin, chores, breakout and your weekly
 
 While you enter times, twy warns when one overlaps another session or block, and offers to **Move to** the nearest free time before or after. Free times are looked for between the hours in Settings → **Suggest times between** (default 06:00–22:00). Clashes never stop a save; any left over are listed on the Plan page.
 
+To plan around the rest of your life, paste your other calendars' private ICS links in Settings → **Plan around your other calendars** (iCloud: share a calendar as a Public Calendar; Google: the calendar's *Secret address in iCal format*). Their events show greyed on the planning page, the Week page and Today, repeats included, and timed ones count when twy checks for clashes (all-day ones don't). The home server fetches each link itself, at most every 15 minutes, so it needs internet access; if a link can't be reached, twy says so and uses the last copy. Imported events are read-only and never go into twy's own calendar.
+
 Settings → **Calendar** has a private subscribe link. Tap **Subscribe on this device** on your iPhone, or on a Mac use Calendar → File → New Calendar Subscription. The calendar shows this week's sessions. Next week appears once you've planned it, or from the day of your weekly review block, whichever comes first. Your device fetches it from the home server, so it updates while you're on your home Wi-Fi (Google and Outlook's cloud can't reach your home network). **Reset link** stops old subscriptions from working.
 
 ## How scoring works

@@ -43,7 +43,8 @@
 {% if can_plan %}
 <p><a class="btn small{{ ' primary' if not planned }}" href="{{ plan_url }}">{{ "Edit week " ~ week_no ~ "'s plan" if planned else "Plan week " ~ week_no }}</a></p>
 {% endif %}
-{% if not session_count %}
+{% for error in imported.errors %}<p class="muted small import-error">⚠ {{ error }}</p>{% endfor %}
+{% if not session_count and not imported.timed and not imported.all_day %}
 <section class="card empty">
   <p>Nothing scheduled this week.</p>
   <p class="muted small">Plan the week to place your tactics, or add time blocks on the Plan page.</p>
@@ -55,26 +56,28 @@
   {% for day, items in days %}
   <section class="card day{{ ' today' if day == today }}">
     <h2>{{ day.strftime("%A") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h2>
+    {% for title in imported.all_day.get(day, []) %}<p class="allday small">{{ title }}</p>{% endfor %}
     {% for s in items %}
     <{{ session_tag(s) }} class="session kind-{{ s.kind }}{{ ' clash' if s.uid in clashes }}"{{ session_attrs(s) }}>
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
       <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}{% if s.uid in clashes %} · overlaps {{ clashes[s.uid]|join(", ") }}{% endif %}</span></span>
     </{{ session_tag(s) }}>
     {% else %}
-    <p class="muted small">Nothing scheduled.</p>
+    {% if not imported.all_day.get(day) %}<p class="muted small">Nothing scheduled.</p>{% endif %}
     {% endfor %}
   </section>
   {% endfor %}
 </div>
 
 {# Desktop: a 7-day timeline. Positions are percentages of the visible hours. #}
-<div class="timeline" style="--span: {{ span }}">
+<div class="timeline{{ ' has-allday' if imported.all_day }}" style="--span: {{ span }}">
   <div class="tl-hours">
     {% for h in hours %}<span style="top: {{ '%.3f' % ((h - lo) / span * 100) }}%">{{ h|hhmm }}</span>{% endfor %}
   </div>
   {% for day, items in days %}
   <div class="tl-day{{ ' today' if day == today }}">
     <div class="tl-head">{{ day.strftime("%a") }} <strong>{{ day.day }}</strong></div>
+    {% if imported.all_day %}<div class="tl-allday">{% for title in imported.all_day.get(day, []) %}<span class="allday" title="{{ title }}">{{ title }}</span>{% endfor %}</div>{% endif %}
     <div class="tl-body">
       {% for s in items %}
       {% set lane, count = layout[s.uid] %}
@@ -92,6 +95,7 @@
 <p class="legend small">
   <span><span class="kind-dot kind-tactic"></span>Tactic</span>
   {% for key, label in kinds.items() %}<span><span class="kind-dot kind-{{ key }}"></span>{{ label }}</span>{% endfor %}
+  {% if imported.timed or imported.all_day %}<span><span class="kind-dot kind-import"></span>Your calendar</span>{% endif %}
 </p>
 <div id="session-pop" class="session-pop" popover></div>
 {% endif %}

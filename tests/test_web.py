@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+from twy import calendars
 from twy.db import connect
 from twy.models import Goal, Tactic
 from twy.repo import Repo
@@ -470,6 +471,79 @@ def test_week_plan_skips_moves_blocks_and_adds_events(client, db_path):
         (0, 510, False),
         (2, 480, True),
     ]
+
+
+def test_plan_around_an_imported_calendar(client, db_path, monkeypatch):
+    login(client)
+    repo = repo_for(db_path)
+    repo.set_setting("week_start", "0")
+    cycle = repo.create_cycle("Q4", date(2026, 10, 12), 0)  # TODAY (Wed 14 Oct) is in week 1
+    goal = repo.save_goal(Goal(None, cycle.id, "Fit"))
+    run = repo.save_tactic(Tactic(None, goal.id, "Run", times_per_week=2))
+    base = f"/c/{cycle.id}"
+    feed = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n"
+        "BEGIN:VEVENT\r\nUID:a\r\nSUMMARY:Team offsite\r\nDTSTART:20261014T090000\r\nDURATION:PT3H\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:b\r\nSUMMARY:Mum's birthday\r\nDTSTART;VALUE=DATE:20261015\r\nEND:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        if "broken" in url:
+            raise OSError("timed out")
+        return feed.encode()
+
+    monkeypatch.setattr(calendars, "fetch", fake_fetch)
+
+    # Settings: links one per line; webcal:// is read as https://, and a bad line is refused.
+    assert 'id="imports"' in client.get("/settings").text
+    response = post(client, "/settings/imports", {"import_urls": "webcal://cal.test/me.ics\nnot a link"})
+    assert response.status_code == 422 and "Line 2 isn&#39;t a calendar link" in response.text
+    assert "not a link" in response.text and repo.import_urls == []
+    links = "webcal://cal.test/me.ics\n\nhttps://broken.test/secret-token.ics"
+    assert post(client, "/settings/imports", {"import_urls": links}).location == "/settings#imports"
+    assert repo.import_urls == ["https://cal.test/me.ics", "https://broken.test/secret-token.ics"]
+
+    # Shown greyed on the planning page, the Week page and Today, with the failing link named by host only.
+    page = client.get(f"{base}/week/1/plan").text
+    assert "Team offsite" in page and "Mum&#39;s birthday" in page and "+ your calendar" in page
+    assert "Couldn&#39;t load your calendar from broken.test." in page and "secret-token" not in page
+    page = client.get(f"{base}/week/1").text
+    assert 'class="session kind-import' in page and "Your calendar" in page and 'class="allday small"' in page
+    assert "0 sessions" in page  # imported events aren't part of the plan
+    page = client.get(f"{base}/day/2026-10-14").text
+    assert "Team offsite" in page
+    assert fetched.count("https://cal.test/me.ics") == 1  # cached for 15 minutes
+
+    # They count in clash checks; the all-day birthday doesn't.
+    def check(day, time):
+        form = {"slot_kind": ["tactic"], "slot_ref": [str(run.id)], "slot_day": [day], "slot_time": [time]}
+        return post(client, f"{base}/week/1/plan/check", {**form, "slot_minutes": ["60"]}).get_json()["rows"][0]
+
+    hint = check("2", "10:00")
+    assert hint["clashes"] == ["Overlaps Team offsite · Wed 09:00–12:00"]
+    assert (hint["earlier"], hint["later"]) == ("08:00", "12:00")
+    assert check("3", "10:00") is None
+
+    # And they never go into twy's own calendar feed.
+    post(
+        client,
+        f"{base}/week/1/plan",
+        {
+            "slot_kind": ["tactic"],
+            "slot_ref": [str(run.id)],
+            "slot_day": ["2"],
+            "slot_time": ["07:00"],
+            "slot_minutes": ["30"],
+        },
+    )
+    ics_text = client.application.test_client().get(f"/calendar/{repo.calendar_token}.ics").text
+    assert ics_text.count("BEGIN:VEVENT") == 1 and "Team offsite" not in ics_text
+
+    assert post(client, "/settings/imports", {"import_urls": ""}).status_code == 302
+    assert repo.import_urls == [] and "Team offsite" not in client.get(f"{base}/week/1").text
 
 
 def test_open_plans_follow_tactic_and_block_changes(client, db_path):

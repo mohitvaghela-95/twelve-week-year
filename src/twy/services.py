@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date
 
+from twy.calendars import MAX_LINKS, normalise_url
 from twy.domain.conflicts import (
     PairWarning,
     Placed,
@@ -132,6 +133,22 @@ def parse_slots(days: list[str], times: list[str], minutes: list[str]) -> list[S
         except FormError as e:
             raise FormError(f"Slot {row}: {e}") from None
     return sorted(slots, key=lambda s: (s.weekday, s.start_min))
+
+
+def parse_import_urls(text: str) -> list[str]:
+    """Calendar links from the settings textarea, one per line; blank lines are ignored."""
+    urls: list[str] = []
+    for n, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        url = normalise_url(line)
+        if url is None:
+            raise FormError(f"Line {n} isn't a calendar link. Use one that starts with webcal://, https:// or http://.")
+        if url not in urls:
+            urls.append(url)
+    if len(urls) > MAX_LINKS:
+        raise FormError(f"Up to {MAX_LINKS} calendars, please.")
+    return urls
 
 
 def parse_day_window(start_text: str, end_text: str) -> tuple[int, int]:

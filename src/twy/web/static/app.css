@@ -552,6 +552,14 @@ body.onboarding { padding-bottom: 24px; }
 .slots .slot-title { grid-column: 1 / -1; }
 .slot-usual { grid-column: 1 / -1; margin: -2px 0 0; }
 
+/* Events from your other calendars: greyed, dashed, read-only. */
+.session.kind-import, .tl-item.kind-import { border-left-style: dashed; opacity: 0.75; }
+.allday { margin: 4px 0 0; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.import-error { color: var(--warn); }
+.tl-allday { display: flex; flex-direction: column; gap: 2px; height: 34px; margin-bottom: 4px; overflow: hidden; }
+.timeline.has-allday .tl-hours { margin-top: 70px; } /* .tl-head 32px + .tl-allday 38px */
+.tl-allday .allday { margin: 0; font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .kind-tactic { --kind: var(--accent); }
 .kind-admin { --kind: #868e96; }
 .kind-chores { --kind: #e67700; }
@@ -559,6 +567,7 @@ body.onboarding { padding-bottom: 24px; }
 .kind-review { --kind: #ae3ec9; }
 .kind-other { --kind: #1098ad; }
 .kind-event { --kind: #d6336c; }
+.kind-import { --kind: #868e96; }
 .kind-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--kind); margin-right: 6px; vertical-align: 0; }
 
 .week-summary { font-weight: 600; }

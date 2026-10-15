@@ -35,17 +35,19 @@
 </form>
 
 <section class="card busy">
-  <div class="card-head"><h2>{{ "Saved plan" if planned else "Before planning" }}</h2><a class="small" href="{{ url_for('web.plan', cycle_id=cycle.id, _anchor='blocks') }}">Weekly blocks ›</a></div>
+  <div class="card-head"><h2>{{ "Saved plan" if planned else "Before planning" }}{{ " + your calendar" if imported.timed or imported.all_day }}</h2><a class="small" href="{{ url_for('web.plan', cycle_id=cycle.id, _anchor='blocks') }}">Weekly blocks ›</a></div>
+  {% for error in imported.errors %}<p class="muted small import-error">⚠ {{ error }}</p>{% endfor %}
   {% for day, items in days %}
   <div class="busy-day{{ ' today' if day == today }}">
     <h3>{{ day.strftime("%a") }} <span class="muted">{{ day.day }} {{ day.strftime("%b") }}</span></h3>
+    {% for title in imported.all_day.get(day, []) %}<p class="allday small">{{ title }}</p>{% endfor %}
     {% for s in items %}
     <div class="session kind-{{ s.kind }}">
       <span class="time">{{ s.start_min|hhmm }}<br><span class="muted">{{ s.end_min|hhmm }}</span></span>
       <span class="what"><strong>{{ s.title }}</strong><span class="muted small">{{ s.context or kinds.get(s.kind, "Tactic") }}</span></span>
     </div>
     {% else %}
-    <p class="muted small">Nothing yet.</p>
+    {% if not imported.all_day.get(day) %}<p class="muted small">Nothing yet.</p>{% endif %}
     {% endfor %}
   </div>
   {% endfor %}

@@ -140,6 +140,11 @@ class Repo:
         return int(self.get_setting("day_start", str(start))), int(self.get_setting("day_end", str(end)))
 
     @property
+    def import_urls(self) -> list[str]:
+        """Other calendars' ICS links, shown while planning (see twy.calendars)."""
+        return [u for u in (self.get_setting("import_urls") or "").splitlines() if u]
+
+    @property
     def calendar_token(self) -> str:
         """Secret for the calendar feed URL, created on first use."""
         return self.get_setting("calendar_token") or self.rotate_calendar_token()

@@ -22,6 +22,7 @@ from flask import (
     url_for,
 )
 
+from twy.calendars import MAX_LINKS
 from twy.db import backup_to, connect
 from twy.domain.dates import (
     EXECUTION_WEEKS,
@@ -64,6 +65,7 @@ from twy.services import (
     parse_day_window,
     parse_float,
     parse_goal_form,
+    parse_import_urls,
     parse_int,
     parse_max_weekly_items,
     parse_prompt_form,
@@ -96,6 +98,7 @@ from twy.week_plans import (
     before_tactics_deleted,
     copy_prev_items,
     form_rows,
+    imports_for_week,
     next_week_to_plan,
     parse_plan_rows,
     plan_form,
@@ -662,11 +665,13 @@ def week(cycle_id: int, week_no: int):
     if not 1 <= week_no <= REVIEW_WEEK:
         abort(404)
     sessions = week_sessions(r, cycle, week_no)
+    imported = imports_for_week(r, cycle, week_no)
+    shown = sorted(sessions + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     first, last = week_range(cycle.start_date, week_no)
     days = [first + timedelta(days=i) for i in range(7)]
     # Timeline bounds (desktop): whole hours around the week's sessions, at least 07:00–21:00.
-    lo = min([s.start_min for s in sessions] + [7 * 60]) // 60 * 60
-    hi = -(-max([s.end_min for s in sessions] + [21 * 60]) // 60) * 60
+    lo = min([s.start_min for s in shown] + [7 * 60]) // 60 * 60
+    hi = -(-max([s.end_min for s in shown] + [21 * 60]) // 60) * 60
     planned = week_no in r.planned_weeks(cycle.id)
     tactics = r.list_tactics(cycle.id) if week_no <= EXECUTION_WEEKS else []
     tactics = [t for t in tactics if t.active_in(week_no)]
@@ -681,9 +686,10 @@ def week(cycle_id: int, week_no: int):
         week_no=week_no,
         first=first,
         last=last,
-        days=[(d, [s for s in sessions if s.day == d]) for d in days],
-        clashes=overlaps(sessions),
-        layout=lanes(sessions),
+        days=[(d, [s for s in shown if s.day == d]) for d in days],
+        clashes=overlaps(shown),
+        layout=lanes(shown),
+        imported=imported,
         kinds=SESSION_KINDS,
         total_min=sum(s.duration_min for s in sessions),
         session_count=len(sessions),
@@ -704,7 +710,8 @@ def week(cycle_id: int, week_no: int):
 def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied: bool = False):
     r = repo()
     first, last = week_range(cycle.start_date, week_no)
-    saved = week_sessions(r, cycle, week_no)
+    imported = imports_for_week(r, cycle, week_no)
+    saved = sorted(week_sessions(r, cycle, week_no) + imported.timed, key=lambda s: (s.day, s.start_min, s.title))
     return render_template(
         "week_plan.html",
         cycle=cycle,
@@ -713,6 +720,7 @@ def plan_page(cycle: Cycle, week_no: int, form, error: str | None = None, copied
         last=last,
         form=form,
         days=[(d, [s for s in saved if s.day == d]) for d in (first + timedelta(days=i) for i in range(7))],
+        imported=imported,
         kinds=SESSION_KINDS,
         planned=week_no in r.planned_weeks(cycle.id),
         can_copy=week_no > 1 and week_no - 1 in r.planned_weeks(cycle.id),
@@ -819,6 +827,7 @@ def day_page(cycle_id: int, iso: str):
     week_no = week_of(cycle, day)
     first, last = week_range(cycle.start_date, week_no)
     rows = today_rows(r, cycle, day)
+    imported = imports_for_week(r, cycle, week_no)
     return render_template(
         "today.html",
         cycle=cycle,
@@ -830,7 +839,12 @@ def day_page(cycle_id: int, iso: str):
         today=today(),
         rows=rows,
         progress=week_progress(rows),
-        sessions=[s for s in week_sessions(r, cycle, week_no) if s.day == day],
+        sessions=sorted(
+            [s for s in week_sessions(r, cycle, week_no) if s.day == day] + imported.on(day),
+            key=lambda s: (s.start_min, s.title),
+        ),
+        all_day=imported.all_day.get(day, []),
+        import_errors=imported.errors,
         unplanned=unplanned_reminders(r, cycle, today()),
         kinds=SESSION_KINDS,
         existing=existing,
@@ -1043,18 +1057,16 @@ def vision():
 @bp.route("/settings", methods=["GET", "POST"])
 def settings():
     r = repo()
-    week_start, max_items, alert, error = r.week_start, str(r.max_weekly_items), str(r.alert_minutes), None
-    day_start, day_end = (hhmm(m) for m in r.day_window)
+    fields, error = saved_settings_fields(), None
     if request.method == "POST":
         week_start = request.form.get("week_start", type=int)
         if week_start is None or not 0 <= week_start <= 6:
             abort(400)
-        max_items = request.form.get("max_weekly_items", "")
-        alert = request.form.get("alert_minutes", "")
-        day_start, day_end = request.form.get("day_start", ""), request.form.get("day_end", "")
+        fields = {k: request.form.get(k, "") for k in fields} | {"week_start": week_start}
         try:
-            limit, alert_minutes = parse_max_weekly_items(max_items), parse_alert_minutes(alert)
-            window = parse_day_window(day_start, day_end)
+            limit = parse_max_weekly_items(fields["max_weekly_items"])
+            alert_minutes = parse_alert_minutes(fields["alert_minutes"])
+            window = parse_day_window(fields["day_start"], fields["day_end"])
         except FormError as e:
             error = str(e)
         else:
@@ -1065,23 +1077,39 @@ def settings():
             r.set_setting("day_end", str(window[1]))
             flash(f"Settings saved. Weeks start on {WEEKDAY_NAMES[week_start]}.")
             return redirect(url_for(".settings"))
+    return settings_page(fields, error=error)
+
+
+def settings_page(fields: dict, error: str | None = None, import_text: str | None = None, import_error=None):
+    r = repo()
     feed_url = url_for(".calendar_feed", token=r.calendar_token, _external=True)
     return render_template(
         "settings.html",
         weekdays=WEEKDAY_NAMES,
-        week_start=week_start,
-        max_weekly_items=max_items,
-        alert_minutes=alert,
-        day_start=day_start,
-        day_end=day_end,
+        **fields,
         feed_url=feed_url,
         webcal_url="webcal://" + feed_url.split("://", 1)[1],
         error=error,
+        import_urls="\n".join(r.import_urls) if import_text is None else import_text,
+        import_error=import_error,
+        MAX_LINKS=MAX_LINKS,
         db_path=current_app.config["TWY_DB"],
         prompts={scope: r.list_prompts(scope) for scope in PROMPT_SCOPES},
         prompt_kinds=PROMPT_KINDS,
         tab="settings",
     )
+
+
+def saved_settings_fields() -> dict:
+    r = repo()
+    day_start, day_end = (hhmm(m) for m in r.day_window)
+    return {
+        "week_start": r.week_start,
+        "max_weekly_items": str(r.max_weekly_items),
+        "alert_minutes": str(r.alert_minutes),
+        "day_start": day_start,
+        "day_end": day_end,
+    }
 
 
 def load_prompt(prompt_id: int) -> Prompt:
@@ -1142,6 +1170,20 @@ def prompt_delete(prompt_id: int):
     repo().delete_prompt(prompt.id)
     flash(f"Deleted “{prompt.label}”. Past answers to it are kept.")
     return to_prompts()
+
+
+@bp.post("/settings/imports")
+def settings_imports():
+    text = request.form.get("import_urls", "")
+    try:
+        urls = parse_import_urls(text)
+    except FormError as e:
+        return settings_page(saved_settings_fields(), import_text=text, import_error=str(e)), 422
+    repo().set_setting("import_urls", "\n".join(urls))
+    flash(
+        f"Planning around {len(urls)} calendar{'s' if len(urls) != 1 else ''}." if urls else "Calendar links removed."
+    )
+    return redirect(url_for(".settings", _anchor="imports"))
 
 
 @bp.post("/settings/calendar/reset")
